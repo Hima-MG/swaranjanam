@@ -19,6 +19,14 @@ const messages: Record<string, string> = {
     "An account already exists with this email. Sign in with your email and password instead.",
   "auth/operation-not-allowed": "This sign-in method is not enabled yet. Please contact the academy.",
   "auth/unauthorized-domain": "Sign-in is not enabled for this website address yet.",
+  "auth/missing-email": "Please enter your email address.",
+  "auth/unauthorized-continue-uri": "Password reset is not set up for this website address yet. Please contact the academy.",
+  "auth/invalid-continue-uri": "Password reset is not set up for this website address yet. Please contact the academy.",
+  "auth/missing-continue-uri": "Password reset is not set up for this website address yet. Please contact the academy.",
+  "auth/invalid-api-key": "Sign-in is not available right now. Please contact the academy.",
+  "auth/api-key-not-valid.-please-pass-a-valid-api-key.": "Sign-in is not available right now. Please contact the academy.",
+  "auth/quota-exceeded": "Too many requests right now. Please try again later.",
+  "auth/internal-error": "Something went wrong on our side. Please try again in a moment.",
   "firebase/not-configured": "Sign-in is not available yet. Please contact the academy.",
 };
 

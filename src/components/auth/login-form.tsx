@@ -6,18 +6,22 @@ import { useState } from "react";
 import { AuthDivider, GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { useAuthAction } from "@/components/auth/use-auth-action";
 import { FormAlert } from "@/components/forms/form-alert";
+import { useHydrated } from "@/components/forms/use-hydrated";
 import { FormField } from "@/components/forms/form-field";
+import { PasswordField } from "@/components/forms/password-field";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/loading-state";
 import { loginWithEmail, loginWithGoogle } from "@/lib/auth/client";
 
 export function LoginForm() {
   const { pending, error, run } = useAuthAction();
+  const hydrated = useHydrated();
   const [method, setMethod] = useState<"email" | "google" | null>(null);
 
   return (
     <div className="flex flex-col gap-5">
       <form
+        method="post"
         className="flex flex-col gap-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -36,10 +40,9 @@ export function LoginForm() {
             required
           />
           <div className="flex flex-col gap-2">
-            <FormField
+            <PasswordField
               id="password"
               label="Password"
-              type="password"
               autoComplete="current-password"
               placeholder="Your password"
               required
@@ -53,7 +56,7 @@ export function LoginForm() {
           </div>
         </fieldset>
         {error && <FormAlert tone="error">{error}</FormAlert>}
-        <Button type="submit" size="lg" className="w-full" disabled={pending}>
+        <Button type="submit" size="lg" className="w-full" disabled={!hydrated || pending}>
           {pending && method === "email" && <Spinner className="size-4 text-cream" />}
           {pending && method === "email" ? "Signing in…" : "Sign In"}
         </Button>

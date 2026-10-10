@@ -3,6 +3,7 @@ import "server-only";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { cache } from "react";
 
 import { ROLE_HOME, SESSION_COOKIE_NAME, TEACHER_CLAIMS, type Role } from "@/lib/auth/constants";
@@ -94,6 +95,13 @@ export async function createSessionCookie(idToken: string) {
 export const getSession = cache(async (strict: boolean = true): Promise<SessionUser | null> => {
   const cookie = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (!cookie) return null;
+
+  // With Cache Components + Partial Prefetching, Next.js can prerender with
+  // the request's cookies (per-session prefetch shells, dev validation).
+  // Verification compares token expiry with Date.now() and may call Firebase,
+  // so it must only ever run for a real request: stop prerendering here.
+  // Never move this verification into a "use cache" scope.
+  await connection();
 
   try {
     const claims = await getAdminAuth().verifySessionCookie(cookie, strict);
