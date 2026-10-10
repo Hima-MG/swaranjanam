@@ -1,0 +1,423 @@
+{
+  "_comment": "Snapshot of the former static catalogue (src/data/courses.ts), kept ONLY as input for scripts/migrate-courses.mjs. The website never reads this file. Delete it once the migration has been run and verified.",
+  "courses": [
+    {
+      "slug": "basics-for-beginners",
+      "title": "Basics for Beginners",
+      "subtitle": "Begin your Carnatic journey with the right foundation",
+      "description": "A gentle, structured introduction to Carnatic vocal music. Learn sruti alignment, the seven swaras, basic talas and voice culture so that every later lesson rests on a strong base.",
+      "level": "Beginner",
+      "category": "Foundations",
+      "format": "Live Online",
+      "duration": "12 weeks",
+      "lessonCount": 36,
+      "price": 4999,
+      "originalPrice": 6499,
+      "rating": 4.9,
+      "reviewCount": 128,
+      "studentCount": 340,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "10 years & above",
+      "tag": "Bestseller",
+      "featured": true,
+      "tone": "maroon",
+      "outcomes": [
+        "Sing in tune with the sruti (drone)",
+        "Recognise and render the seven swaras",
+        "Keep Adi tala with confidence",
+        "Build daily practice habits for voice culture"
+      ],
+      "curriculum": [
+        {
+          "title": "Sruti & Swara",
+          "lessons": [
+            "Finding your sruti",
+            "The seven swaras",
+            "Sthayi — octaves"
+          ]
+        },
+        {
+          "title": "Tala Fundamentals",
+          "lessons": [
+            "Introduction to tala",
+            "Adi tala kriya",
+            "Counting in speeds"
+          ]
+        },
+        {
+          "title": "Voice Culture",
+          "lessons": [
+            "Breath control",
+            "Akaram practice",
+            "Daily riyaz routine"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "intermediate-carnatic-music",
+      "title": "Intermediate Carnatic Music",
+      "subtitle": "Deepen your repertoire with varnams and kritis",
+      "description": "For students who have completed the foundational exercises. Explore varnams, simple kritis and the grammar of ragas while refining gamakas and rhythmic precision.",
+      "level": "Intermediate",
+      "category": "Vocal Training",
+      "format": "Hybrid",
+      "duration": "16 weeks",
+      "lessonCount": 48,
+      "price": 7499,
+      "rating": 4.8,
+      "reviewCount": 86,
+      "studentCount": 190,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "12 years & above",
+      "tag": "Popular",
+      "featured": true,
+      "tone": "gold",
+      "outcomes": [
+        "Render Adi and Ata tala varnams",
+        "Learn kritis of the Trinity",
+        "Understand arohana, avarohana and raga lakshana",
+        "Refine gamakas and kalapramana"
+      ],
+      "curriculum": [
+        {
+          "title": "Varnams",
+          "lessons": [
+            "Structure of a varnam",
+            "Tana varnam in Mohanam",
+            "Speed practice"
+          ]
+        },
+        {
+          "title": "Kritis",
+          "lessons": [
+            "Pallavi, anupallavi, charanam",
+            "Kriti in Hamsadhwani",
+            "Sangatis"
+          ]
+        },
+        {
+          "title": "Raga Awareness",
+          "lessons": [
+            "Raga lakshana",
+            "Characteristic phrases",
+            "Listening exercises"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "advanced-training",
+      "title": "Advanced Training",
+      "subtitle": "Manodharma, concert preparation and mentorship",
+      "description": "An immersive programme for serious learners preparing for performance. Work on alapana, niraval, kalpana swaras and concert planning with close one-to-one mentorship.",
+      "level": "Advanced",
+      "category": "Vocal Training",
+      "format": "Live Online",
+      "duration": "24 weeks",
+      "lessonCount": 60,
+      "price": 14999,
+      "rating": 4.9,
+      "reviewCount": 42,
+      "studentCount": 75,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "15 years & above",
+      "tag": "Limited Seats",
+      "featured": true,
+      "tone": "brown",
+      "outcomes": [
+        "Develop raga alapana with clarity",
+        "Improvise niraval and kalpana swaras",
+        "Plan and present a full concert",
+        "Receive personalised performance feedback"
+      ],
+      "curriculum": [
+        {
+          "title": "Manodharma",
+          "lessons": [
+            "Raga alapana",
+            "Niraval technique",
+            "Kalpana swaras"
+          ]
+        },
+        {
+          "title": "Concert Craft",
+          "lessons": [
+            "Building a concert list",
+            "Stage presence",
+            "Accompanist coordination"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "vocal-for-children",
+      "title": "Vocal for Children",
+      "subtitle": "Joyful, age-appropriate Carnatic lessons for young learners",
+      "description": "Playful yet disciplined classes designed for children. Short sessions, songs and rhythm games introduce swaras, talas and simple compositions while building concentration.",
+      "level": "Beginner",
+      "category": "Children",
+      "format": "Live Online",
+      "duration": "10 weeks",
+      "lessonCount": 30,
+      "price": 3999,
+      "rating": 4.9,
+      "reviewCount": 104,
+      "studentCount": 260,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "6 – 12 years",
+      "tag": "Popular",
+      "featured": true,
+      "tone": "rose",
+      "outcomes": [
+        "Sing swaras with correct pitch",
+        "Clap and count simple talas",
+        "Learn short songs and shlokas",
+        "Grow listening and focus skills"
+      ],
+      "curriculum": [
+        {
+          "title": "Fun with Swaras",
+          "lessons": [
+            "Swara songs",
+            "Pitch games",
+            "Echo singing"
+          ]
+        },
+        {
+          "title": "Rhythm Play",
+          "lessons": [
+            "Clap the tala",
+            "Rhythm patterns",
+            "Group singing"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "sarali-varisai",
+      "title": "Sarali Varisai",
+      "subtitle": "The first step of every Carnatic musician",
+      "description": "Master all Sarali Varisai exercises in Mayamalavagowla across three speeds. Builds pitch accuracy, breath control and tala discipline.",
+      "level": "Beginner",
+      "category": "Foundations",
+      "format": "Recorded",
+      "duration": "4 weeks",
+      "lessonCount": 14,
+      "price": 1499,
+      "rating": 4.8,
+      "reviewCount": 212,
+      "studentCount": 520,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "All ages",
+      "tone": "gold",
+      "outcomes": [
+        "Sing all 14 Sarali Varisai",
+        "Practise in three speeds",
+        "Maintain steady tala"
+      ],
+      "curriculum": [
+        {
+          "title": "Sarali Varisai 1 – 7",
+          "lessons": [
+            "Exercises 1 – 3",
+            "Exercises 4 – 7",
+            "Second speed"
+          ]
+        },
+        {
+          "title": "Sarali Varisai 8 – 14",
+          "lessons": [
+            "Exercises 8 – 11",
+            "Exercises 12 – 14",
+            "Third speed"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "janta-varisai",
+      "title": "Janta Varisai",
+      "subtitle": "Strengthen your voice with paired-note exercises",
+      "description": "Janta Varisai develops voice control and emphasis through doubled swaras. Recommended after Sarali Varisai.",
+      "level": "Beginner",
+      "category": "Foundations",
+      "format": "Recorded",
+      "duration": "4 weeks",
+      "lessonCount": 12,
+      "price": 1499,
+      "rating": 4.7,
+      "reviewCount": 156,
+      "studentCount": 410,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "All ages",
+      "tone": "maroon",
+      "outcomes": [
+        "Render janta swaras with clarity",
+        "Improve vocal strength and stress",
+        "Practise in three speeds"
+      ],
+      "curriculum": [
+        {
+          "title": "Janta Varisai",
+          "lessons": [
+            "Introduction",
+            "Exercises 1 – 6",
+            "Exercises 7 – 12"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "alankaram",
+      "title": "Alankaram",
+      "subtitle": "The seven alankarams across the sapta talas",
+      "description": "Learn the seven alankarams set to the sapta talas. A vital bridge between basic exercises and compositions.",
+      "level": "Beginner",
+      "category": "Foundations",
+      "format": "Hybrid",
+      "duration": "6 weeks",
+      "lessonCount": 18,
+      "price": 1999,
+      "rating": 4.8,
+      "reviewCount": 98,
+      "studentCount": 300,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "All ages",
+      "tag": "New",
+      "tone": "brown",
+      "outcomes": [
+        "Sing all seven alankarams",
+        "Understand the sapta talas",
+        "Apply alankarams in other ragas"
+      ],
+      "curriculum": [
+        {
+          "title": "Sapta Tala Alankarams",
+          "lessons": [
+            "Dhruva & Matya",
+            "Rupaka & Jhampa",
+            "Triputa, Ata & Eka"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "geetham",
+      "title": "Geetham",
+      "subtitle": "Your first compositions — simple, melodic, timeless",
+      "description": "Geethams are the first full compositions a student learns. Study the Pillari Geethams and other classics with sahityam and meaning.",
+      "level": "Beginner",
+      "category": "Foundations",
+      "format": "Live Online",
+      "duration": "8 weeks",
+      "lessonCount": 20,
+      "price": 2499,
+      "rating": 4.8,
+      "reviewCount": 74,
+      "studentCount": 220,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "8 years & above",
+      "tone": "rose",
+      "outcomes": [
+        "Sing Pillari Geethams",
+        "Learn swara and sahityam together",
+        "Understand the meaning of the lyrics"
+      ],
+      "curriculum": [
+        {
+          "title": "Pillari Geethams",
+          "lessons": [
+            "Sri Gananatha",
+            "Kunda Gowra",
+            "Padumanabha"
+          ]
+        },
+        {
+          "title": "Sanchari Geethams",
+          "lessons": [
+            "Introduction",
+            "Geetham in Mohanam",
+            "Geetham in Kalyani"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "bhajan-devotional-singing",
+      "title": "Bhajan & Devotional Singing",
+      "subtitle": "Sing with bhakti — bhajans, namavalis and stotras",
+      "description": "Learn popular bhajans, namavalis and devotional songs with correct pronunciation and classical grounding. Ideal for families and community singing.",
+      "level": "All Levels",
+      "category": "Devotional",
+      "format": "Live Online",
+      "duration": "8 weeks",
+      "lessonCount": 16,
+      "price": 2999,
+      "rating": 4.9,
+      "reviewCount": 66,
+      "studentCount": 180,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "All ages",
+      "tone": "gold",
+      "outcomes": [
+        "Sing popular bhajans and namavalis",
+        "Pronounce Sanskrit and Telugu lyrics clearly",
+        "Lead group singing with confidence"
+      ],
+      "curriculum": [
+        {
+          "title": "Bhajans",
+          "lessons": [
+            "Ganesha bhajans",
+            "Rama & Krishna bhajans",
+            "Devi bhajans"
+          ]
+        },
+        {
+          "title": "Stotras & Namavalis",
+          "lessons": [
+            "Pronunciation guide",
+            "Namavalis",
+            "Short stotras"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "short-workshops",
+      "title": "Short Workshops",
+      "subtitle": "Focused weekend sessions on specific topics",
+      "description": "Intensive weekend workshops on topics such as voice care, raga appreciation, tala mastery and festival compositions. Open to all students.",
+      "level": "All Levels",
+      "category": "Workshops",
+      "format": "Live Online",
+      "duration": "2 days",
+      "lessonCount": 4,
+      "price": 999,
+      "rating": 4.7,
+      "reviewCount": 48,
+      "studentCount": 150,
+      "instructor": "Swaraanjanam Faculty",
+      "ageGroup": "All ages",
+      "tag": "New",
+      "tone": "maroon",
+      "outcomes": [
+        "Deep-dive into one focused topic",
+        "Interact live with faculty",
+        "Take away practice material"
+      ],
+      "curriculum": [
+        {
+          "title": "Workshop Sessions",
+          "lessons": [
+            "Session 1",
+            "Session 2",
+            "Session 3",
+            "Q&A"
+          ]
+        }
+      ]
+    }
+  ]
+}

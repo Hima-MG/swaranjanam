@@ -37,7 +37,7 @@ const categoryIcons: Record<CourseCategory, LucideIcon> = {
 };
 
 interface CourseThumbnailProps {
-  course: Pick<Course, "title" | "image" | "tone" | "category">;
+  course: Pick<Course, "title" | "thumbnailUrl" | "tone" | "category">;
   className?: string;
   sizes?: string;
   priority?: boolean;
@@ -51,13 +51,13 @@ export function CourseThumbnail({
   priority,
 }: CourseThumbnailProps) {
   const style = toneStyles[course.tone];
-  const Icon = categoryIcons[course.category];
+  const Icon = course.category ? categoryIcons[course.category] : Music;
 
   return (
     <div className={cn("relative aspect-[4/3] overflow-hidden", style.surface, className)}>
-      {course.image ? (
+      {course.thumbnailUrl ? (
         <Image
-          src={course.image}
+          src={course.thumbnailUrl}
           alt={course.title}
           fill
           sizes={sizes}

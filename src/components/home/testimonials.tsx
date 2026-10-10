@@ -10,7 +10,7 @@ export function Testimonials() {
       <SectionHeader
         eyebrow="Student voices"
         title="Loved by students and parents"
-        description="Learners of every age share what music at Swaranjanam means to them."
+        description="Learners of every age share what music at Swaraanjanam means to them."
       />
       <div className="grid gap-6 md:grid-cols-3">
         {testimonials.map((t) => (

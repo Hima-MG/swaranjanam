@@ -2,15 +2,22 @@
   "name": "swaranjanam",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "set-role": "node scripts/set-role.mjs",
+    "migrate:courses": "node scripts/migrate-courses.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
+    "firebase": "^13.0.0",
+    "firebase-admin": "^14.5.0",
     "lucide-react": "^1.53.0",
     "next": "16.4.0",
     "radix-ui": "^1.7.0",

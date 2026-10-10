@@ -1,0 +1,99 @@
+rules_version = '2';
+
+// Swaraanjanam Firestore security rules.
+//
+// Data model (see src/lib/lms/types.ts):
+//   users/{uid}                          profile; role mirrors the auth custom claim
+//   courses/{courseId}                   teacherIds[], status: draft | published
+//   modules/{moduleId}                   courseId, order
+//   lessons/{lessonId}                   courseId, moduleId, order, resources[]
+//   enrollments/{courseId}_{studentId}   status: active | revoked
+//   lessonProgress/{studentId}_{lessonId}
+//
+// Principles:
+//   * Deny by default.
+//   * NO client writes anywhere. Every write goes through server code using
+//     the Admin SDK, which bypasses these rules and performs its own
+//     authorisation (src/lib/lms/server/access.ts). Users therefore cannot
+//     change roles, enroll themselves, or edit course content from a browser.
+//   * Reads are narrowly scoped so that even a direct client SDK call can
+//     only see what the server would show that user. Lesson documents carry
+//     resource URLs, so reading them requires an active enrollment in a
+//     published course (or being an assigned teacher).
+//   * The teacher role is the `role` custom claim ("teacher", or the legacy
+//     "admin"), set only by trusted tooling (scripts/set-role.mjs).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTeacher() {
+      return isSignedIn() && request.auth.token.role in ["teacher", "admin"];
+    }
+
+    function course(courseId) {
+      return get(/databases/$(database)/documents/courses/$(courseId)).data;
+    }
+
+    function teachesCourse(courseId) {
+      return isTeacher()
+        && exists(/databases/$(database)/documents/courses/$(courseId))
+        && request.auth.uid in course(courseId).teacherIds;
+    }
+
+    function enrolledIn(courseId) {
+      let path = /databases/$(database)/documents/enrollments/$(courseId + "_" + request.auth.uid);
+      return isSignedIn()
+        && exists(path)
+        && get(path).data.status == "active"
+        && course(courseId).status == "published";
+    }
+
+    match /users/{uid} {
+      // Own profile only. Teacher views of students are built on the server.
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow write: if false;
+    }
+
+    match /courses/{courseId} {
+      allow get: if teachesCourse(courseId) || enrolledIn(courseId);
+      allow list: if false;
+      allow write: if false;
+    }
+
+    match /modules/{moduleId} {
+      allow get: if teachesCourse(resource.data.courseId) || enrolledIn(resource.data.courseId);
+      allow list: if false;
+      allow write: if false;
+    }
+
+    match /lessons/{lessonId} {
+      allow get: if teachesCourse(resource.data.courseId) || enrolledIn(resource.data.courseId);
+      allow list: if false;
+      allow write: if false;
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow get: if isSignedIn()
+        && (resource.data.studentId == request.auth.uid || teachesCourse(resource.data.courseId));
+      allow list: if false;
+      // Students can never create or modify enrollments.
+      allow write: if false;
+    }
+
+    match /lessonProgress/{progressId} {
+      allow get: if isSignedIn() && resource.data.studentId == request.auth.uid;
+      allow list: if false;
+      allow write: if false;
+    }
+
+    // Explicit catch-all deny for every other collection.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -31,10 +31,10 @@ export function LearningPath() {
             <h3 className="type-h3 text-cream">{step.title}</h3>
             <p className="text-sm leading-relaxed text-cream/75">{step.description}</p>
             <Link
-              href={`/courses/${step.courseSlug}`}
+              href="/courses"
               className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold text-gold-light transition-colors hover:text-cream"
             >
-              View course
+              Explore courses
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
           </li>

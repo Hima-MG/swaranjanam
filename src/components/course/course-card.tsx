@@ -3,7 +3,6 @@ import Link from "next/link";
 
 import { CourseBadge } from "@/components/course/course-badge";
 import { CoursePrice } from "@/components/course/course-price";
-import { CourseRating } from "@/components/course/course-rating";
 import { CourseThumbnail } from "@/components/course/course-thumbnail";
 import { cn } from "@/lib/utils";
 import type { Course } from "@/types/course";
@@ -31,10 +30,12 @@ export function CourseCard({ course, className }: CourseCardProps) {
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-6">
-        <div className="flex items-center justify-between gap-2">
-          <span className="type-eyebrow text-gold">{course.category}</span>
-          <CourseBadge kind="level" value={course.level} />
-        </div>
+        {(course.category || course.level) && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="type-eyebrow text-gold">{course.category}</span>
+            {course.level && <CourseBadge kind="level" value={course.level} />}
+          </div>
+        )}
 
         <h3 className="type-h3">
           {/* Stretched link makes the whole card clickable while keeping one tab stop. */}
@@ -45,22 +46,29 @@ export function CourseCard({ course, className }: CourseCardProps) {
             {course.title}
           </Link>
         </h3>
-        <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
-          {course.subtitle}
-        </p>
+        {course.titleMl && (
+          <p lang="ml" className="-mt-2 text-sm text-brown-muted">
+            {course.titleMl}
+          </p>
+        )}
+        {(course.subtitle || course.description) && (
+          <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+            {course.subtitle || course.description}
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-brown-muted">
-          <span className="inline-flex items-center gap-1.5">
-            <Clock className="size-4" aria-hidden="true" />
-            {course.duration}
-          </span>
+          {course.duration && (
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="size-4" aria-hidden="true" />
+              {course.duration}
+            </span>
+          )}
           <span className="inline-flex items-center gap-1.5">
             <BookOpen className="size-4" aria-hidden="true" />
-            {course.lessonCount} lessons
+            {course.lessonCount} {course.lessonCount === 1 ? "lesson" : "lessons"}
           </span>
         </div>
-
-        <CourseRating rating={course.rating} reviewCount={course.reviewCount} />
 
         <div className="mt-auto flex items-end justify-between gap-3 border-t border-border pt-4">
           <CoursePrice price={course.price} originalPrice={course.originalPrice} />

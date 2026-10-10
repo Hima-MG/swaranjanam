@@ -1,8 +1,8 @@
 "use client";
 
-import { Info } from "lucide-react";
 import { useState } from "react";
 
+import { FormAlert } from "@/components/forms/form-alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -15,9 +15,8 @@ interface PlaceholderFormProps {
 }
 
 /**
- * Form shell for the public UI phase. Submission is intercepted client-side and
- * nothing is sent anywhere; replace with real handlers (Firebase Auth, contact
- * API) in later phases.
+ * Form shell for forms whose backend is not built yet (currently Contact).
+ * Submission is intercepted client-side and nothing is sent anywhere.
  */
 export function PlaceholderForm({ submitLabel, notice, className, children }: PlaceholderFormProps) {
   const [submitted, setSubmitted] = useState(false);
@@ -34,15 +33,7 @@ export function PlaceholderForm({ submitLabel, notice, className, children }: Pl
       <Button type="submit" size="lg" className="mt-1 w-full">
         {submitLabel}
       </Button>
-      {submitted && (
-        <p
-          role="status"
-          className="flex items-start gap-2 rounded-xl border border-gold/40 bg-gold-soft/60 p-3 text-sm text-brown"
-        >
-          <Info className="mt-0.5 size-4 shrink-0 text-gold" aria-hidden="true" />
-          {notice}
-        </p>
-      )}
+      {submitted && <FormAlert>{notice}</FormAlert>}
     </form>
   );
 }

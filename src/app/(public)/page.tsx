@@ -1,7 +1,9 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { CourseGrid } from "@/components/course/course-grid";
+import { AboutFounder } from "@/components/home/about-founder";
 import { Hero } from "@/components/home/hero";
 import { LearningPath } from "@/components/home/learning-path";
 import { Testimonials } from "@/components/home/testimonials";
@@ -11,14 +13,23 @@ import { Button } from "@/components/ui/button";
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
 import { features } from "@/data/content";
-import { getFeaturedCourses } from "@/lib/courses";
+import { featuredCourses, getPublishedCourses } from "@/lib/catalog/server";
+import { CatalogEmpty, CatalogError } from "@/components/course/catalog-states";
+import { CourseGridSkeleton } from "@/components/ui/loading-state";
+
+/** Featured published courses from Firestore (falls back to the first published courses). */
+async function FeaturedCourses() {
+  const result = await getPublishedCourses();
+  if (!result.ok) return <CatalogError />;
+  if (result.data.length === 0) return <CatalogEmpty />;
+  return <CourseGrid courses={featuredCourses(result.data, 4)} columns={4} />;
+}
 
 export default function HomePage() {
-  const featured = getFeaturedCourses(4);
-
   return (
     <>
       <Hero />
+      <AboutFounder />
 
       <Section spacing="lg">
         <SectionHeader
@@ -34,12 +45,14 @@ export default function HomePage() {
             </Button>
           }
         />
-        <CourseGrid courses={featured} columns={4} />
+        <Suspense fallback={<CourseGridSkeleton count={4} />}>
+          <FeaturedCourses />
+        </Suspense>
       </Section>
 
       <Section tone="muted" pattern="kolam" spacing="lg">
         <SectionHeader
-          eyebrow="Why Swaranjanam"
+          eyebrow="Why Swaraanjanam"
           title="Tradition, taught with care"
           description="We combine the depth of the classical tradition with the structure and flexibility that modern students need."
         />

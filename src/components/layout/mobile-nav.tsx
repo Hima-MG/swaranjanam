@@ -4,6 +4,7 @@ import { Menu } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { LogoutButton } from "@/components/auth/logout-button";
 import { Logo } from "@/components/layout/logo";
 import { NavLinks } from "@/components/layout/nav-links";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,8 @@ import {
 } from "@/components/ui/sheet";
 import { mainNav } from "@/config/site";
 
-export function MobileNav() {
+/** `account` is null for guests; otherwise the signed-in user's dashboard link. */
+export function MobileNav({ account = null }: { account?: { dashboardHref: string } | null }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
 
@@ -39,16 +41,29 @@ export function MobileNav() {
           <NavLinks items={mainNav} orientation="vertical" onNavigate={close} />
         </nav>
         <SheetFooter className="border-t border-border">
-          <Button asChild variant="outline" size="lg">
-            <Link href="/login" onClick={close}>
-              Login
-            </Link>
-          </Button>
-          <Button asChild size="lg">
-            <Link href="/register" onClick={close}>
-              Enroll Now
-            </Link>
-          </Button>
+          {account ? (
+            <>
+              <Button asChild size="lg">
+                <Link href={account.dashboardHref} onClick={close}>
+                  My Dashboard
+                </Link>
+              </Button>
+              <LogoutButton variant="outline" className="h-12 text-base" />
+            </>
+          ) : (
+            <>
+              <Button asChild variant="outline" size="lg">
+                <Link href="/login" onClick={close}>
+                  Login
+                </Link>
+              </Button>
+              <Button asChild size="lg">
+                <Link href="/register" onClick={close}>
+                  Enroll Now
+                </Link>
+              </Button>
+            </>
+          )}
         </SheetFooter>
       </SheetContent>
     </Sheet>

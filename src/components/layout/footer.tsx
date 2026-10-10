@@ -1,10 +1,13 @@
 import { Mail, MapPin, Phone } from "lucide-react";
 import { cacheLife } from "next/cache";
 import Link from "next/link";
+import { Fragment, Suspense } from "react";
 
 import { Logo } from "@/components/layout/logo";
+import { InstagramIcon, YouTubeIcon } from "@/components/shared/social-icons";
 import { Container } from "@/components/ui/container";
-import { footerNav, siteConfig } from "@/config/site";
+import { footerNav, siteConfig, type NavItem } from "@/config/site";
+import { featuredCourses, getPublishedCourses } from "@/lib/catalog/server";
 
 // `new Date()` is not allowed in the prerendered shell under Cache Components,
 // so the year is computed inside a cached scope.
@@ -14,11 +17,43 @@ async function CurrentYear() {
   return <>{new Date().getFullYear()}</>;
 }
 
+const { social } = siteConfig;
+
 const contactItems = [
   { icon: Mail, label: siteConfig.contact.email, href: `mailto:${siteConfig.contact.email}` },
+  { icon: InstagramIcon, label: `Instagram ${social.instagram.handle}`, href: social.instagram.url },
+  ...(social.youtubeUrl ? [{ icon: YouTubeIcon, label: "YouTube channel", href: social.youtubeUrl }] : []),
   { icon: Phone, label: siteConfig.contact.phone, href: `tel:${siteConfig.contact.phone.replace(/\s/g, "")}` },
   { icon: MapPin, label: siteConfig.contact.address },
 ];
+
+const ALL_COURSES: NavItem = { label: "All courses", href: "/courses" };
+
+function FooterColumn({ title, items }: { title: string; items: NavItem[] }) {
+  return (
+    <div>
+      <h3 className="font-sans type-eyebrow text-gold-light">{title}</h3>
+      <ul className="mt-5 flex flex-col gap-3 text-sm">
+        {items.map((item) => (
+          <li key={item.href}>
+            <Link href={item.href} className="text-cream/75 transition-colors hover:text-gold-light">
+              {item.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Featured published courses from Firestore (cached with the catalogue). */
+async function PopularCourses() {
+  const result = await getPublishedCourses();
+  const items = result.ok
+    ? featuredCourses(result.data, 4).map((course) => ({ label: course.title, href: `/courses/${course.slug}` }))
+    : [];
+  return <FooterColumn title="Popular Courses" items={items.length > 0 ? items : [ALL_COURSES]} />;
+}
 
 export function Footer() {
   return (
@@ -33,7 +68,11 @@ export function Footer() {
               <li key={label} className="flex items-center gap-3 text-cream/85">
                 <Icon className="size-4 shrink-0 text-gold-light" aria-hidden="true" />
                 {href ? (
-                  <a href={href} className="transition-colors hover:text-gold-light">
+                  <a
+                    href={href}
+                    className="break-all transition-colors hover:text-gold-light"
+                    {...(href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                  >
                     {label}
                   </a>
                 ) : (
@@ -44,22 +83,15 @@ export function Footer() {
           </ul>
         </div>
 
-        {footerNav.map((group) => (
-          <div key={group.title}>
-            <h3 className="font-sans type-eyebrow text-gold-light">{group.title}</h3>
-            <ul className="mt-5 flex flex-col gap-3 text-sm">
-              {group.items.map((item) => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className="text-cream/75 transition-colors hover:text-gold-light"
-                  >
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+        {footerNav.map((group, index) => (
+          <Fragment key={group.title}>
+            <FooterColumn title={group.title} items={group.items} />
+            {index === 0 && (
+              <Suspense fallback={<FooterColumn title="Popular Courses" items={[ALL_COURSES]} />}>
+                <PopularCourses />
+              </Suspense>
+            )}
+          </Fragment>
         ))}
       </Container>
 

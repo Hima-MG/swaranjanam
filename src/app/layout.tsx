@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Cormorant_Garamond, DM_Sans } from "next/font/google";
+import { Cormorant_Garamond, DM_Sans, Noto_Sans_Malayalam } from "next/font/google";
 
 import { siteConfig } from "@/config/site";
 import "./globals.css";
@@ -16,6 +16,16 @@ const body = DM_Sans({
   variable: "--font-body",
   subsets: ["latin"],
   display: "swap",
+});
+
+// Malayalam text (lang="ml") renders in Noto Sans Malayalam on every device.
+// Not preloaded: most pages are English-only, so it loads only when used.
+const malayalam = Noto_Sans_Malayalam({
+  variable: "--font-malayalam",
+  subsets: ["malayalam"],
+  weight: "variable",
+  display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -37,7 +47,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${display.variable} ${body.variable} h-full antialiased`}
+      className={`${display.variable} ${body.variable} ${malayalam.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>

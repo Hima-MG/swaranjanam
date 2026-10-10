@@ -213,3 +213,17 @@
     cursor: pointer;
   }
 }
+
+/* -----------------------------------------------------------------------------
+ * Malayalam (lang="ml")
+ * Unlayered on purpose so it overrides the display font set by type-* utilities:
+ * Cormorant and DM Sans have no Malayalam glyphs.
+ * -------------------------------------------------------------------------- */
+:lang(ml) {
+  font-family: var(--font-malayalam), var(--font-body), sans-serif;
+  letter-spacing: normal;
+}
+p:lang(ml),
+li:lang(ml) {
+  line-height: 1.85;
+}

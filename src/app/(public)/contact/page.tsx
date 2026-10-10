@@ -1,23 +1,27 @@
 import { Clock, Mail, MapPin, MessageCircle } from "lucide-react";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { FormField } from "@/components/forms/form-field";
 import { PlaceholderForm } from "@/components/forms/placeholder-form";
 import { PageHero } from "@/components/shared/page-hero";
+import { InstagramIcon, YouTubeIcon } from "@/components/shared/social-icons";
 import { Section } from "@/components/ui/section";
 import { Textarea } from "@/components/ui/textarea";
 import { siteConfig } from "@/config/site";
-import { getAllCourses } from "@/lib/courses";
+import { getPublishedCourses } from "@/lib/catalog/server";
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Get in touch with Swaranjanam to book a free trial class or ask about our courses.",
+  description: "Get in touch with Swaraanjanam to book a free trial class or ask about our courses.",
 };
 
-const { contact } = siteConfig;
+const { contact, social } = siteConfig;
 
 const contactDetails = [
   { icon: Mail, label: "Email", value: contact.email, href: `mailto:${contact.email}` },
+  { icon: InstagramIcon, label: "Instagram", value: social.instagram.handle, href: social.instagram.url },
+  ...(social.youtubeUrl ? [{ icon: YouTubeIcon, label: "YouTube", value: "Our channel", href: social.youtubeUrl }] : []),
   { icon: MessageCircle, label: "Phone / WhatsApp", value: contact.whatsapp, href: `tel:${contact.whatsapp.replace(/\s/g, "")}` },
   { icon: MapPin, label: "Location", value: contact.address },
   { icon: Clock, label: "Hours", value: contact.hours },
@@ -26,8 +30,28 @@ const contactDetails = [
 const selectClassName =
   "h-11 w-full rounded-xl border border-input bg-ivory px-3.5 text-base text-brown outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm";
 
+function CourseSelect({ courses }: { courses: { slug: string; title: string }[] }) {
+  return (
+    <FormField id="course" label="Interested in">
+      <select id="course" name="course" defaultValue="" className={selectClassName}>
+        <option value="">Not sure yet</option>
+        {courses.map((course) => (
+          <option key={course.slug} value={course.slug}>
+            {course.title}
+          </option>
+        ))}
+      </select>
+    </FormField>
+  );
+}
+
+/** "Interested in" options: published courses from Firestore. */
+async function PublishedCourseSelect() {
+  const result = await getPublishedCourses();
+  return <CourseSelect courses={result.ok ? result.data : []} />;
+}
+
 export default function ContactPage() {
-  const courses = getAllCourses();
 
   return (
     <>
@@ -50,7 +74,11 @@ export default function ContactPage() {
                 <div className="flex flex-col gap-0.5">
                   <span className="type-eyebrow text-gold">{label}</span>
                   {href ? (
-                    <a href={href} className="font-medium text-brown hover:text-maroon">
+                    <a
+                      href={href}
+                      className="font-medium break-all text-brown hover:text-maroon"
+                      {...(href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                    >
                       {value}
                     </a>
                   ) : (
@@ -71,16 +99,9 @@ export default function ContactPage() {
                 <FormField id="name" label="Full name" autoComplete="name" required />
                 <FormField id="email" label="Email address" type="email" autoComplete="email" required />
                 <FormField id="phone" label="Phone / WhatsApp" type="tel" autoComplete="tel" />
-                <FormField id="course" label="Interested in">
-                  <select id="course" name="course" defaultValue="" className={selectClassName}>
-                    <option value="">Not sure yet</option>
-                    {courses.map((course) => (
-                      <option key={course.slug} value={course.slug}>
-                        {course.title}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
+                <Suspense fallback={<CourseSelect courses={[]} />}>
+                  <PublishedCourseSelect />
+                </Suspense>
               </div>
               <FormField id="message" label="Message">
                 <Textarea

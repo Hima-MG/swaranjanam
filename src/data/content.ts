@@ -28,7 +28,6 @@ export interface JourneyStep {
   step: string;
   title: string;
   description: string;
-  courseSlug: string;
 }
 
 export interface Testimonial {
@@ -40,7 +39,6 @@ export interface Testimonial {
 export const stats: Stat[] = [
   { value: "500+", label: "Students taught" },
   { value: "15+", label: "Years of teaching" },
-  { value: "10", label: "Structured courses" },
   { value: "4.9", label: "Average rating" },
 ];
 
@@ -88,25 +86,21 @@ export const journey: JourneyStep[] = [
     step: "01",
     title: "Foundations",
     description: "Sruti, swara and tala through Sarali, Janta and Alankaram.",
-    courseSlug: "basics-for-beginners",
   },
   {
     step: "02",
     title: "First Compositions",
     description: "Geethams and simple songs that bring swaras to life.",
-    courseSlug: "geetham",
   },
   {
     step: "03",
     title: "Repertoire",
     description: "Varnams and kritis with raga awareness and gamakas.",
-    courseSlug: "intermediate-carnatic-music",
   },
   {
     step: "04",
     title: "Performance",
     description: "Manodharma, improvisation and concert preparation.",
-    courseSlug: "advanced-training",
   },
 ];
 

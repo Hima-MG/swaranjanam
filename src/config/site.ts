@@ -1,18 +1,38 @@
-// Site-wide configuration. Contact details below are placeholders — replace
-// them with the academy's real details before launch.
+// Site-wide configuration. Email and Instagram are the academy's supplied
+// details; phone, WhatsApp, address and hours are still placeholders —
+// replace them with real details before launch.
 export const siteConfig = {
-  name: "Swaranjanam",
-  fullName: "Swaranjanam Carnatic Music Academy",
+  name: "Swaraanjanam",
+  fullName: "Swaraanjanam Carnatic Music Academy",
   tagline: "Carnatic Music Academy",
   description:
     "Learn Carnatic vocal music the traditional way — guided by experienced gurus, structured for modern learners, online and in person.",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
   contact: {
-    email: "hello@swaranjanam.example",
+    email: "swaraanjanammusicacademy@gmail.com",
     phone: "+91 00000 00000",
     whatsapp: "+91 00000 00000",
     address: "Hyderabad, Telangana, India",
     hours: "Mon – Sat, 7:00 AM – 8:00 PM IST",
+  },
+  social: {
+    instagram: { handle: "@swaraanjanam", url: "https://www.instagram.com/swaraanjanam/" },
+    /**
+     * YouTube channel. Set NEXT_PUBLIC_YOUTUBE_URL once the channel is ready;
+     * the link stays hidden until then.
+     */
+    youtubeUrl: process.env.NEXT_PUBLIC_YOUTUBE_URL?.trim() || null,
+  },
+  /** The academy's motto, from the supplied About text. */
+  motto: "Different roads. One beautiful destination.",
+  founder: {
+    name: "Dr. Anjana R. Menon",
+    /**
+     * Founder photograph. No photo has been supplied yet, so a placeholder is
+     * shown. To add one, put the image in /public (e.g. /public/images/founder.jpg)
+     * and set this to "/images/founder.jpg".
+     */
+    photo: null as string | null,
   },
 } as const;
 
@@ -25,6 +45,8 @@ export const mainNav: NavItem[] = [
   { label: "Contact", href: "/contact" },
 ];
 
+// The footer's "Popular Courses" column is built from published courses in
+// Firestore (components/layout/footer.tsx), not listed here.
 export const footerNav: { title: string; items: NavItem[] }[] = [
   {
     title: "Academy",
@@ -32,15 +54,6 @@ export const footerNav: { title: string; items: NavItem[] }[] = [
       { label: "About Us", href: "/about" },
       { label: "All Courses", href: "/courses" },
       { label: "Contact", href: "/contact" },
-    ],
-  },
-  {
-    title: "Popular Courses",
-    items: [
-      { label: "Basics for Beginners", href: "/courses/basics-for-beginners" },
-      { label: "Vocal for Children", href: "/courses/vocal-for-children" },
-      { label: "Sarali Varisai", href: "/courses/sarali-varisai" },
-      { label: "Short Workshops", href: "/courses/short-workshops" },
     ],
   },
   {

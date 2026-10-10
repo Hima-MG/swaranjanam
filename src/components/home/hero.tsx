@@ -6,6 +6,7 @@ import { Ornament } from "@/components/decor/ornament";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
+import { siteConfig } from "@/config/site";
 import { stats } from "@/data/content";
 
 const swaras = ["Sa", "Ri", "Ga", "Ma", "Pa", "Da", "Ni"];
@@ -36,8 +37,8 @@ function HeroArt() {
           <CalendarDays className="size-5" aria-hidden="true" />
         </span>
         <div className="leading-tight">
-          <p className="text-xs text-muted-foreground">Next batch</p>
-          <p className="text-sm font-semibold text-brown">Sarali Varisai</p>
+          <p className="text-xs text-muted-foreground">New batches</p>
+          <p className="text-sm font-semibold text-brown">Every month</p>
         </div>
       </div>
       <div className="absolute -right-3 bottom-36 flex items-center gap-3 rounded-2xl border border-border bg-ivory/95 p-3 pr-5 shadow-card backdrop-blur sm:-right-4">
@@ -65,6 +66,7 @@ export function Hero() {
           <Badge variant="gold" className="h-7 px-3.5">
             Admissions open · New batches every month
           </Badge>
+          <p className="font-heading text-xl text-maroon italic sm:text-2xl">{siteConfig.motto}</p>
           <h1 className="type-display text-brown">
             Where every <span className="text-maroon italic">swara</span> finds its voice
           </h1>

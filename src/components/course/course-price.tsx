@@ -2,8 +2,9 @@ import { formatINR } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface CoursePriceProps {
-  price: number;
-  originalPrice?: number;
+  /** null when the teacher has not listed fees. */
+  price: number | null;
+  originalPrice?: number | null;
   size?: "sm" | "lg";
   showDiscount?: boolean;
   className?: string;
@@ -16,7 +17,14 @@ export function CoursePrice({
   showDiscount = false,
   className,
 }: CoursePriceProps) {
-  const hasDiscount = originalPrice !== undefined && originalPrice > price;
+  if (price === null) {
+    return (
+      <p className={cn("font-heading font-semibold text-maroon", size === "sm" ? "text-lg" : "text-2xl", className)}>
+        Fees on request
+      </p>
+    );
+  }
+  const hasDiscount = originalPrice != null && originalPrice > price;
   const discount = hasDiscount ? Math.round((1 - price / originalPrice) * 100) : 0;
 
   return (
