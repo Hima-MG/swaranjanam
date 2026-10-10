@@ -1,3 +1,28 @@
+/**
+ * Absolute site origin, tolerant of common configuration mistakes:
+ * a value without a protocol (e.g. "swaraanjanam.vercel.app") gets
+ * "https://"; trailing paths and slashes are dropped. Falls back to Vercel's
+ * production domain, then to localhost. Never throws, so a bad value cannot
+ * break the build.
+ */
+export function resolveSiteUrl(
+  value = process.env.NEXT_PUBLIC_SITE_URL,
+  vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL,
+): string {
+  for (const candidate of [value, vercelHost]) {
+    const raw = candidate?.trim();
+    if (!raw) continue;
+    const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      const url = new URL(withProtocol);
+      if (url.protocol === "http:" || url.protocol === "https:") return url.origin;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return "http://localhost:3000";
+}
+
 // Site-wide configuration. Email and Instagram are the academy's supplied
 // details; phone, WhatsApp, address and hours are still placeholders —
 // replace them with real details before launch.
@@ -7,7 +32,7 @@ export const siteConfig = {
   tagline: "Carnatic Music Academy",
   description:
     "Learn Carnatic vocal music the traditional way — guided by experienced gurus, structured for modern learners, online and in person.",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+  url: resolveSiteUrl(),
   contact: {
     email: "swaraanjanammusicacademy@gmail.com",
     phone: "+91 00000 00000",

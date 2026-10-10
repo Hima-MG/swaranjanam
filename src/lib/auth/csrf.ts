@@ -1,5 +1,7 @@
 import "server-only";
 
+import { resolveSiteUrl } from "@/config/site";
+
 /**
  * CSRF protection for state-changing auth endpoints (defence in depth on top
  * of SameSite=Lax cookies):
@@ -47,13 +49,11 @@ function isAllowedOrigin(request: Request, origin: string): boolean {
   const host = request.headers.get("host")?.trim().toLowerCase();
   if (originHost === forwardedHost || originHost === host) return true;
 
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (configured) {
-    try {
-      return new URL(configured).origin === new URL(origin).origin;
-    } catch {
-      // Ignore a malformed NEXT_PUBLIC_SITE_URL rather than failing every login.
-    }
+  // The configured site URL (normalised, so a value without "https://" works).
+  try {
+    if (process.env.NEXT_PUBLIC_SITE_URL && resolveSiteUrl() === new URL(origin).origin) return true;
+  } catch {
+    // Unparseable Origin: reject below.
   }
   return false;
 }
