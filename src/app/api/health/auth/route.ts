@@ -1,3 +1,5 @@
+import { connection } from "next/server";
+
 import { authLog, describeError } from "@/lib/auth/diagnostics";
 
 /**
@@ -7,6 +9,8 @@ import { authLog, describeError } from "@/lib/auth/diagnostics";
  * written to the runtime logs. Safe to remove once production is healthy.
  */
 export async function GET() {
+  // Run on every request: a build-time result would not test the deployed runtime.
+  await connection();
   const stages: [string, () => Promise<unknown>][] = [
     ["load firebase-admin/app", () => import("firebase-admin/app")],
     ["load firebase-admin/auth", () => import("firebase-admin/auth")],
