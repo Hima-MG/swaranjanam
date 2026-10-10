@@ -21,6 +21,9 @@ export function useAuthAction() {
       window.location.assign(redirectTo);
       // Stay pending while the browser navigates away.
     } catch (err) {
+      // Safe diagnostics: the Firebase error code only (never tokens or input).
+      const code = err && typeof err === "object" && "code" in err ? String(err.code) : (err as Error)?.name;
+      console.warn("[auth] sign-in failed:", code ?? "unknown");
       if (!isUserCancellation(err)) setError(authErrorMessage(err));
       setPending(false);
     }
