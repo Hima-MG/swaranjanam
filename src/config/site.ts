@@ -27,12 +27,12 @@ export const siteConfig = {
   motto: "Different roads. One beautiful destination.",
   founder: {
     name: "Dr. Anjana R. Menon",
-    /**
-     * Founder photograph. No photo has been supplied yet, so a placeholder is
-     * shown. To add one, put the image in /public (e.g. /public/images/founder.jpg)
-     * and set this to "/images/founder.jpg".
-     */
-    photo: null as string | null,
+    /** Founder photograph (portrait JPEG, 1200 × 1600). Set to null to show the placeholder. */
+    photo: { src: "/images/founder-anjana.jpeg", width: 1200, height: 1600 } as {
+      src: string;
+      width: number;
+      height: number;
+    } | null,
   },
 } as const;
 

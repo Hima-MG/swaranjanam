@@ -26,22 +26,33 @@ function WithFounderName({ text, name }: { text: string; name: string }) {
 
 function FounderPortrait() {
   const { photo, name } = siteConfig.founder;
+  if (photo) {
+    // Frame matches the photo's 3:4 ratio, so object-cover never crops it; the
+    // arched top only trims the background corners. Below the fold: lazy-loaded.
+    return (
+      <div className="relative mx-auto aspect-[3/4] w-full max-w-sm overflow-hidden rounded-t-[999px] rounded-b-[2rem] border-[6px] border-ivory bg-cream-deep shadow-lifted ring-1 ring-gold/40 lg:max-w-none">
+        <Image
+          src={photo.src}
+          alt={`${name}, founder of Swaraanjanam`}
+          fill
+          sizes="(min-width: 1024px) 380px, (min-width: 640px) 384px, 90vw"
+          className="object-cover object-[50%_30%]"
+        />
+      </div>
+    );
+  }
   return (
     <div className="relative mx-auto aspect-[4/5] w-full max-w-sm overflow-hidden rounded-t-[999px] rounded-b-[2rem] border-[6px] border-ivory bg-gradient-to-b from-maroon to-maroon-deep shadow-lifted ring-1 ring-gold/40">
-      {photo ? (
-        <Image src={photo} alt={name} fill sizes="(min-width: 1024px) 384px, 90vw" className="object-cover" />
-      ) : (
-        // Placeholder until a photograph is supplied (see siteConfig.founder.photo).
-        <div role="img" aria-label={`${name} — photograph coming soon`} className="absolute inset-0">
-          <div className="absolute inset-0 pattern-kolam-light" />
-          <Mandala className="absolute top-[42%] left-1/2 size-[110%] -translate-x-1/2 -translate-y-1/2 text-gold-light/35" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pt-10">
-            <span className="flex size-24 items-center justify-center rounded-full bg-cream/10 font-heading text-4xl font-semibold text-gold-light ring-1 ring-gold-light/40">
-              AM
-            </span>
-          </div>
+      {/* Placeholder shown only when siteConfig.founder.photo is null. */}
+      <div role="img" aria-label={`${name} — photograph coming soon`} className="absolute inset-0">
+        <div className="absolute inset-0 pattern-kolam-light" />
+        <Mandala className="absolute top-[42%] left-1/2 size-[110%] -translate-x-1/2 -translate-y-1/2 text-gold-light/35" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pt-10">
+          <span className="flex size-24 items-center justify-center rounded-full bg-cream/10 font-heading text-4xl font-semibold text-gold-light ring-1 ring-gold-light/40">
+            AM
+          </span>
         </div>
-      )}
+      </div>
     </div>
   );
 }

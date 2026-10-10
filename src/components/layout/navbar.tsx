@@ -59,7 +59,7 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-cream/85 backdrop-blur-md supports-[backdrop-filter]:bg-cream/75">
       <Container className="flex h-18 items-center justify-between gap-6">
-        <Logo />
+        <Logo eager />
         <nav aria-label="Main" className="hidden lg:block">
           <NavLinks items={mainNav} />
         </nav>

@@ -1,59 +1,85 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { siteConfig } from "@/config/site";
 import { cn } from "@/lib/utils";
 
-function LogoMark({ className }: { className?: string }) {
+/** The academy's emblem (square JPEG, 1254 × 1254). */
+export const LOGO_SRC = "/images/swaraanjanam-logo.jpeg";
+const LOGO_ALT = "Swaraanjanam Carnatic Music Academy";
+
+const emblemSizes = {
+  // 44px on phones, 48px from sm up: fits the 72px navbar without dominating it.
+  sm: { className: "size-11 sm:size-12", sizes: "48px" },
+  lg: { className: "size-20 sm:size-24", sizes: "96px" },
+} as const;
+
+/**
+ * The circular emblem on a round ivory badge. The source image is a square
+ * with white corners; the badge absorbs them on light and dark backgrounds.
+ */
+export function LogoEmblem({
+  size = "sm",
+  eager = false,
+  className,
+}: {
+  size?: keyof typeof emblemSizes;
+  /** Load immediately (small, above-the-fold placements). Not a preload. */
+  eager?: boolean;
+  className?: string;
+}) {
+  const { className: sizeClass, sizes } = emblemSizes[size];
   return (
-    <svg viewBox="0 0 40 40" aria-hidden="true" className={cn("size-10", className)}>
-      <circle cx="20" cy="20" r="19" className="fill-maroon" />
-      <circle
-        cx="20"
-        cy="20"
-        r="16"
-        fill="none"
-        className="stroke-gold-light"
-        strokeWidth="0.75"
-        strokeDasharray="1.5 2"
-      />
-      <g className="fill-gold-light">
-        <path d="M20 9c2.6 3.2 2.6 8 0 11.5-2.6-3.5-2.6-8.3 0-11.5Z" />
-        <path d="M20 21c-3.2-.6-6.8-3.2-8-6.8 3.7.1 6.6 2.7 8 6.8Z" fillOpacity="0.85" />
-        <path d="M20 21c3.2-.6 6.8-3.2 8-6.8-3.7.1-6.6 2.7-8 6.8Z" fillOpacity="0.85" />
-      </g>
-      <path
-        d="M11 25.5c2.7 2.2 5.7 3.3 9 3.3s6.3-1.1 9-3.3"
-        fill="none"
-        className="stroke-gold-light"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M14 29.5c1.8 1.1 3.8 1.7 6 1.7s4.2-.6 6-1.7"
-        fill="none"
-        className="stroke-gold-light"
-        strokeWidth="0.9"
-        strokeLinecap="round"
-        strokeOpacity="0.7"
-      />
-    </svg>
+    <Image
+      src={LOGO_SRC}
+      alt={LOGO_ALT}
+      width={1254}
+      height={1254}
+      sizes={sizes}
+      loading={eager ? "eager" : undefined}
+      className={cn("shrink-0 rounded-full bg-ivory object-contain shadow-soft ring-1 ring-gold/30", sizeClass, className)}
+    />
   );
 }
 
+/**
+ * Site logo: emblem + wordmark, linking home. The single shared logo for the
+ * navbar, mobile menu and footer. `variant="emblem"` shows only the larger
+ * emblem (sign-in and registration cards).
+ */
 export function Logo({
   inverted = false,
+  variant = "full",
+  eager = false,
   className,
 }: {
   inverted?: boolean;
+  variant?: "full" | "emblem";
+  eager?: boolean;
   className?: string;
 }) {
+  if (variant === "emblem") {
+    return (
+      <Link
+        href="/"
+        aria-label={`${siteConfig.fullName} — home`}
+        className={cn("inline-flex rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50", className)}
+      >
+        <LogoEmblem size="lg" eager={eager} />
+      </Link>
+    );
+  }
+
   return (
     <Link
       href="/"
       aria-label={`${siteConfig.fullName} — home`}
-      className={cn("group inline-flex items-center gap-3", className)}
+      className={cn(
+        "group inline-flex items-center gap-3 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        className,
+      )}
     >
-      <LogoMark />
+      <LogoEmblem eager={eager} className={inverted ? "ring-gold-light/40" : undefined} />
       <span className="flex flex-col leading-none">
         <span
           className={cn(

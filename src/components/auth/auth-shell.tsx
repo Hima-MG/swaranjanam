@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { Mandala } from "@/components/decor/mandala";
 import { Ornament } from "@/components/decor/ornament";
+import { Logo } from "@/components/layout/logo";
 import { Container } from "@/components/ui/container";
 
 interface AuthShellProps {
@@ -20,6 +21,7 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
       <Container size="sm" className="flex justify-center py-14 sm:py-20">
         <div className="w-full max-w-md rounded-3xl border border-border bg-card p-7 shadow-card sm:p-10">
           <div className="mb-8 flex flex-col items-center gap-3 text-center">
+            <Logo variant="emblem" eager className="mb-2" />
             <h1 className="type-h2">{title}</h1>
             <Ornament />
             <p className="text-sm text-muted-foreground">{description}</p>
