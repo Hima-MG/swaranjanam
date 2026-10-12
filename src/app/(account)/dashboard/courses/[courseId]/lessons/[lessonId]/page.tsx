@@ -7,6 +7,8 @@ import { Suspense } from "react";
 import { ProgressBar } from "@/components/lms/progress-bar";
 import { CourseOutlineNav } from "@/components/lms/student/course-outline-nav";
 import { LessonPlayer } from "@/components/lms/student/lesson-player";
+import { PracticePanel } from "@/components/lms/student/practice-panel";
+import { listOwnSubmissions } from "@/lib/lms/server/feedback";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -23,6 +25,8 @@ async function StudentLesson({ params }: { params: Params }) {
   // Verifies an active enrollment in a published course before returning resources.
   const data = await getStudentLesson(user, courseId, lessonId);
   if (!data) notFound();
+  // Only this student's own recordings, after enrollment has been verified above.
+  const submissions = await listOwnSubmissions(user, data.course.id, data.lesson.id);
   const { course, outline, progress, module, lesson, completed, previous, next } = data;
 
   const outlineNav = (
@@ -63,6 +67,7 @@ async function StudentLesson({ params }: { params: Params }) {
       <div className="flex min-w-0 flex-col gap-6">
         {module && <p className="type-eyebrow text-gold">{module.title}</p>}
         <LessonPlayer courseId={course.id} lesson={lesson} completed={completed} />
+        <PracticePanel courseId={course.id} lessonId={lesson.id} lessonTitle={lesson.title} submissions={submissions} />
         <nav aria-label="Lesson navigation" className="flex flex-wrap justify-between gap-3">
           {previous ? (
             <Button asChild variant="outline">

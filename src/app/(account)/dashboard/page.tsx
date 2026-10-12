@@ -13,13 +13,23 @@ import { Section } from "@/components/ui/section";
 import { getUserProfile } from "@/lib/auth/profile";
 import { requireRole } from "@/lib/auth/session";
 import { getStudentOverview } from "@/lib/lms/server/student";
+import { listAnnouncementsForStudent } from "@/lib/lms/server/announcements";
+import { listOwnClasses } from "@/lib/lms/server/classes";
+import { UpcomingClasses } from "@/components/lms/student/upcoming-classes";
+import { formatDate } from "@/lib/format-date";
 
 export const metadata: Metadata = { title: "My Dashboard" };
 
 async function StudentDashboard() {
   // Server-side guard: signed-out visitors go to /login, teachers to /teacher.
   const user = await requireRole("student", "/dashboard");
-  const [profile, overview] = await Promise.all([getUserProfile(user.uid), getStudentOverview(user)]);
+  const [profile, overview, announcements, liveClasses] = await Promise.all([
+    getUserProfile(user.uid),
+    getStudentOverview(user),
+    listAnnouncementsForStudent(user),
+    // Bound to the signed-in student's uid inside the data layer.
+    listOwnClasses(user),
+  ]);
   const name = profile?.displayName ?? user.name ?? "Student";
 
   const details = [
@@ -52,6 +62,40 @@ async function StudentDashboard() {
             <h2 className="type-h3">Welcome to your music journey</h2>
           )}
         </div>
+
+        <section aria-labelledby="live-classes" className="flex flex-col gap-3">
+          <h2 id="live-classes" className="type-h3">
+            Upcoming classes
+          </h2>
+          <UpcomingClasses classes={liveClasses.classes} serverNow={liveClasses.nowMs} />
+        </section>
+
+        {announcements.length > 0 && (
+          <section aria-labelledby="announcements" className="flex flex-col gap-3">
+            <h2 id="announcements" className="type-h3">
+              Announcements
+            </h2>
+            <ul className="flex flex-col gap-3">
+              {announcements.map((a) => (
+                <li key={a.id} className="rounded-2xl border border-gold/40 bg-gold-soft/40 p-5">
+                  <p className="font-semibold text-brown">{a.title}</p>
+                  {a.titleMl && (
+                    <p lang="ml" className="text-sm text-brown-muted">
+                      {a.titleMl}
+                    </p>
+                  )}
+                  <p className="mt-2 text-sm whitespace-pre-line text-brown">{a.body}</p>
+                  {a.bodyMl && (
+                    <p lang="ml" className="mt-2 text-sm whitespace-pre-line text-brown">
+                      {a.bodyMl}
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">{formatDate(a.createdAt)}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section aria-labelledby="my-courses" className="flex flex-col gap-4">
           <h2 id="my-courses" className="type-h2">

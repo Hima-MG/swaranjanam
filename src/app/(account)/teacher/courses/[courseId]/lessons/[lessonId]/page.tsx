@@ -6,7 +6,6 @@ import { Suspense } from "react";
 
 import { LessonDetailsForm } from "@/components/lms/teacher/lesson-details-form";
 import { LessonResourcesEditor } from "@/components/lms/teacher/lesson-resources-editor";
-import { Container } from "@/components/ui/container";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { getLessonForEditing } from "@/lib/lms/server/teacher";
@@ -26,7 +25,7 @@ async function LessonEditor({ params }: { params: Params }) {
     <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-3">
         <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-          <Link href="/teacher" className="hover:text-maroon">
+          <Link href="/teacher/courses" className="hover:text-maroon">
             Courses
           </Link>
           <ChevronRight className="size-4" aria-hidden="true" />
@@ -73,10 +72,10 @@ async function LessonEditor({ params }: { params: Params }) {
 
 export default function TeacherLessonPage({ params }: PageProps<"/teacher/courses/[courseId]/lessons/[lessonId]">) {
   return (
-    <Container className="py-10 sm:py-14">
+    <>
       <Suspense fallback={<LoadingState label="Loading lesson…" />}>
         <LessonEditor params={params} />
       </Suspense>
-    </Container>
+    </>
   );
 }

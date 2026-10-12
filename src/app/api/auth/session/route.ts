@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     authLog("session.create", "admin-sdk-load-failed", describeError(error), "error");
     return unavailable();
   }
-  const { createSessionCookie, ensureUserProfile, SessionError, AdminConfigError } = server;
+  const { createSessionCookie, ensureUserProfile, recordSignIn, SessionError, AdminConfigError } = server;
 
   let stage = "verify-token";
   try {
@@ -75,6 +75,8 @@ export async function POST(request: Request) {
       phone: body.profile?.phone,
       provider: decoded.firebase.sign_in_provider,
     });
+
+    await recordSignIn(decoded.uid);
 
     stage = "set-cookie";
     (await cookies()).set(SESSION_COOKIE_NAME, cookie, {

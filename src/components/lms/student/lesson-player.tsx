@@ -23,18 +23,22 @@ export function LessonPlayer({
   courseId,
   lesson,
   completed,
+  preview = false,
 }: {
   courseId: string;
   lesson: LessonRecord;
   completed: boolean;
+  /** Teacher preview: shows the student view without recording progress. */
+  preview?: boolean;
 }) {
   const [language, setLanguage] = useLanguagePreference();
   const completion = useServerAction();
 
   // Remember this lesson for "Continue learning". Failures are harmless.
   useEffect(() => {
+    if (preview) return;
     void recordLessonAccess(courseId, lesson.id).catch(() => undefined);
-  }, [courseId, lesson.id]);
+  }, [courseId, lesson.id, preview]);
 
   const title = localized(lesson.title, lesson.titleMl, language);
   const notes = localized(lesson.description, lesson.descriptionMl, language);
@@ -91,25 +95,27 @@ export function LessonPlayer({
         )}
       </section>
 
-      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-soft sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-center gap-2 text-sm text-brown">
-          {completed ? (
-            <CheckCircle2 className="size-5 text-gold" aria-hidden="true" />
-          ) : (
-            <Circle className="size-5 text-brown-muted" aria-hidden="true" />
-          )}
-          {completed ? "You have completed this lesson." : "Finished practising? Mark this lesson complete."}
-        </p>
-        <Button
-          type="button"
-          variant={completed ? "outline" : "default"}
-          disabled={completion.pending}
-          onClick={() => completion.run(() => setLessonCompleted(courseId, lesson.id, !completed))}
-        >
-          {completion.pending && <Spinner className="size-4 text-current" />}
-          {completed ? "Mark as not complete" : "Mark as complete"}
-        </Button>
-      </div>
+      {!preview && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-soft sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-center gap-2 text-sm text-brown">
+            {completed ? (
+              <CheckCircle2 className="size-5 text-gold" aria-hidden="true" />
+            ) : (
+              <Circle className="size-5 text-brown-muted" aria-hidden="true" />
+            )}
+            {completed ? "You have completed this lesson." : "Finished practising? Mark this lesson complete."}
+          </p>
+          <Button
+            type="button"
+            variant={completed ? "outline" : "default"}
+            disabled={completion.pending}
+            onClick={() => completion.run(() => setLessonCompleted(courseId, lesson.id, !completed))}
+          >
+            {completion.pending && <Spinner className="size-4 text-current" />}
+            {completed ? "Mark as not complete" : "Mark as complete"}
+          </Button>
+        </div>
+      )}
       {completion.error && <FormAlert tone="error">{completion.error}</FormAlert>}
     </div>
   );

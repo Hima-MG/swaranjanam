@@ -10,11 +10,14 @@ export function CourseOutlineNav({
   outline,
   currentLessonId,
   compact = false,
+  lessonHref = (lessonId) => `/dashboard/courses/${courseId}/lessons/${lessonId}`,
 }: {
   courseId: string;
   outline: ModuleWithLessons<StudentLessonSummary>[];
   currentLessonId?: string;
   compact?: boolean;
+  /** Link target per lesson (the teacher preview uses its own URLs). */
+  lessonHref?: (lessonId: string) => string;
 }) {
   return (
     <ol className={cn("flex flex-col", compact ? "gap-4" : "gap-5")}>
@@ -38,7 +41,7 @@ export function CourseOutlineNav({
                 return (
                   <li key={lesson.id}>
                     <Link
-                      href={`/dashboard/courses/${courseId}/lessons/${lesson.id}`}
+                      href={lessonHref(lesson.id)}
                       aria-current={current ? "page" : undefined}
                       className={cn(
                         "flex items-start gap-3 rounded-lg px-2 py-2 text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",

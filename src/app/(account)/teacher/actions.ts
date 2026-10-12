@@ -15,6 +15,7 @@ import {
   requireActionUser,
   runAction,
 } from "@/lib/lms/server/access";
+import { writeAudit } from "@/lib/lms/server/audit";
 import { col, db, mapLesson, mapModule } from "@/lib/lms/server/db";
 import {
   createUploadTicket,
@@ -26,6 +27,7 @@ import {
 import { toApprovedVideoEmbed, type UploadKind } from "@/lib/media/config";
 import {
   COURSE_STATUSES,
+  DEFAULT_CURRENCY,
   ENROLLMENT_STATUSES,
   LANGUAGES,
   RESOURCE_TYPES,
@@ -134,6 +136,7 @@ export async function createCourse(input: unknown): Promise<ActionResult<{ cours
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
+    await writeAudit(user, { action: "course.create", targetType: "course", targetId: ref.id, summary: `Created course "${text.title}"` });
     return { courseId: ref.id };
   });
 }
@@ -155,7 +158,7 @@ export async function updateCourseDetails(courseId: string, input: unknown): Pro
  */
 export async function updateCourseCatalog(courseId: string, input: unknown): Promise<ActionResult> {
   return runAction("updateCourseCatalog", async () => {
-    const { course } = await authorizeTeacherForCourse(courseId);
+    const { user, course } = await authorizeTeacherForCourse(courseId);
     const { value, errors } = parseCatalogInput((input ?? {}) as Record<string, unknown>);
     if (Object.keys(errors).length > 0) throw new AccessError("Please fix the highlighted fields.", errors);
 
@@ -175,6 +178,12 @@ export async function updateCourseCatalog(courseId: string, input: unknown): Pro
     }
 
     await col("courses").doc(course.id).update({ ...fields, slug, updatedAt: FieldValue.serverTimestamp() });
+    await writeAudit(user, {
+      action: "course.catalog",
+      targetType: "course",
+      targetId: course.id,
+      summary: `Updated catalogue details of "${course.title}"${slug !== course.slug ? ` (web address ${course.slug} → ${slug})` : ""}`,
+    });
     invalidateCatalog();
     refresh();
     return null;
@@ -183,7 +192,7 @@ export async function updateCourseCatalog(courseId: string, input: unknown): Pro
 
 export async function setCourseStatus(courseId: string, status: unknown): Promise<ActionResult> {
   return runAction("setCourseStatus", async () => {
-    const { course } = await authorizeTeacherForCourse(courseId);
+    const { user, course } = await authorizeTeacherForCourse(courseId);
     if (!COURSE_STATUSES.includes(status as CourseStatus)) throw new AccessError("Invalid status.");
     if (status === "published") {
       const lessons = await col("lessons").where("courseId", "==", course.id).limit(1).get();
@@ -192,9 +201,107 @@ export async function setCourseStatus(courseId: string, status: unknown): Promis
       }
     }
     await col("courses").doc(course.id).update({ status, updatedAt: FieldValue.serverTimestamp() });
+    await writeAudit(user, {
+      action: `course.${status}`,
+      targetType: "course",
+      targetId: course.id,
+      summary: `Set "${course.title}" to ${status}`,
+    });
     invalidateCatalog();
     refresh();
     return null;
+  });
+}
+
+/**
+ * Copies a course into a new DRAFT: details, catalogue fields, modules,
+ * lessons and external (YouTube/Vimeo) video links. Uploaded media and the
+ * thumbnail are NOT copied, because both courses would then share Cloudinary
+ * files and deleting one course's media would break the other.
+ */
+export async function duplicateCourse(courseId: string): Promise<ActionResult<{ courseId: string; skippedUploads: number }>> {
+  return runAction("duplicateCourse", async () => {
+    const { user, course } = await authorizeTeacherForCourse(courseId);
+    const source = await col("courses").doc(course.id).get();
+    const [modulesSnap, lessonsSnap] = await Promise.all([
+      col("modules").where("courseId", "==", course.id).get(),
+      col("lessons").where("courseId", "==", course.id).get(),
+    ]);
+
+    const newRef = col("courses").doc();
+    const title = cleanText(`Copy of ${course.title}`, LIMITS.title);
+    // Import-only bookkeeping fields are not carried over to the copy.
+    const data = Object.fromEntries(
+      Object.entries(source.data() ?? {}).filter(([key]) => key !== "migratedFrom" && key !== "legacy"),
+    );
+    const writes: { ref: FirebaseFirestore.DocumentReference; data: Record<string, unknown> }[] = [];
+    writes.push({
+      ref: newRef,
+      data: {
+        ...data,
+        id: newRef.id,
+        title,
+        slug: await uniqueSlug(slugify(title)),
+        status: "draft" satisfies CourseStatus,
+        thumbnailUrl: null,
+        thumbnailPublicId: null,
+        featured: false,
+        teacherIds: [user.uid],
+        createdBy: user.uid,
+        duplicatedFrom: course.id,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+    });
+
+    const moduleIdMap = new Map<string, string>();
+    for (const doc of modulesSnap.docs) {
+      const ref = col("modules").doc();
+      moduleIdMap.set(doc.id, ref.id);
+      writes.push({
+        ref,
+        data: { ...doc.data(), id: ref.id, courseId: newRef.id, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() },
+      });
+    }
+    let skippedUploads = 0;
+    for (const doc of lessonsSnap.docs) {
+      const moduleId = moduleIdMap.get(String(doc.get("moduleId")));
+      if (!moduleId) continue;
+      const ref = col("lessons").doc();
+      const resources = Array.isArray(doc.get("resources")) ? (doc.get("resources") as Record<string, unknown>[]) : [];
+      const kept = resources.filter((r) => r.source === "external").map((r) => ({ ...r, id: randomUUID() }));
+      skippedUploads += resources.length - kept.length;
+      writes.push({
+        ref,
+        data: {
+          ...doc.data(),
+          id: ref.id,
+          courseId: newRef.id,
+          moduleId,
+          resources: kept,
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+      });
+    }
+
+    // Firestore batches hold at most 500 writes. The course is written last,
+    // so a partial failure never leaves a visible but incomplete course.
+    const [courseWrite, ...children] = writes;
+    for (let i = 0; i < children.length; i += 450) {
+      const batch = db().batch();
+      children.slice(i, i + 450).forEach((w) => batch.set(w.ref, w.data));
+      await batch.commit();
+    }
+    await courseWrite.ref.create(courseWrite.data);
+
+    await writeAudit(user, {
+      action: "course.duplicate",
+      targetType: "course",
+      targetId: newRef.id,
+      summary: `Duplicated "${course.title}" as "${title}" (${modulesSnap.size} modules, ${lessonsSnap.size} lessons)`,
+    });
+    return { courseId: newRef.id, skippedUploads };
   });
 }
 
@@ -289,13 +396,14 @@ export async function updateModule(courseId: string, moduleId: string, input: un
 
 export async function deleteModule(courseId: string, moduleId: string): Promise<ActionResult> {
   return runAction("deleteModule", async () => {
-    const { course } = await authorizeTeacherForCourse(courseId);
+    const { user, course } = await authorizeTeacherForCourse(courseId);
     const moduleRecord = await getModuleOfCourse(course.id, moduleId);
     const lessons = await col("lessons").where("moduleId", "==", moduleRecord.id).limit(1).get();
     if (!lessons.empty) {
       throw new AccessError("Delete or move this module's lessons before deleting the module.");
     }
     await col("modules").doc(moduleRecord.id).delete();
+    await writeAudit(user, { action: "module.delete", targetType: "course", targetId: course.id, summary: `Deleted module "${moduleRecord.title}" from "${course.title}"` });
     await touchCourse(course.id);
     refresh();
     return null;
@@ -371,9 +479,10 @@ export async function updateLesson(courseId: string, lessonId: string, input: un
 
 export async function deleteLesson(courseId: string, lessonId: string): Promise<ActionResult> {
   return runAction("deleteLesson", async () => {
-    const { course } = await authorizeTeacherForCourse(courseId);
+    const { user, course } = await authorizeTeacherForCourse(courseId);
     const lesson = await getLessonOfCourse(course.id, lessonId);
     await col("lessons").doc(lesson.id).delete();
+    await writeAudit(user, { action: "lesson.delete", targetType: "course", targetId: course.id, summary: `Deleted lesson "${lesson.title}" from "${course.title}"` });
     // Uploaded files belong only to this lesson; remove them from Cloudinary too.
     await Promise.all(
       lesson.resources
@@ -634,6 +743,75 @@ export async function moveResource(
 }
 
 // --- Enrollments --------------------------------------------------------------
+//
+// One document per student+course. Access status (active/revoked) is kept
+// separate from payments. The first enrollment date and the agreed fee are
+// preserved across revoke/restore, and every change is appended to `history`.
+
+type AdminAuthUser = Awaited<ReturnType<ReturnType<typeof getAdminAuth>["getUser"]>>;
+
+function assertStudentAccount(student: AdminAuthUser) {
+  const claim = student.customClaims?.role;
+  if (typeof claim === "string" && TEACHER_CLAIMS.includes(claim)) {
+    throw new AccessError("That account belongs to a teacher, not a student.");
+  }
+  if (student.disabled) throw new AccessError("That account is disabled.");
+}
+
+function historyEvent(type: "enrolled" | "revoked" | "restored", by: string) {
+  return { type, at: Timestamp.now(), by };
+}
+
+/** Creates or re-activates an enrollment. Returns what happened. */
+async function grantEnrollment(
+  actor: Awaited<ReturnType<typeof requireActionUser>>,
+  course: { id: string; title: string; price: number | null; status: CourseStatus },
+  student: AdminAuthUser,
+) {
+  const ref = col("enrollments").doc(enrollmentId(course.id, student.uid));
+  const outcome = await db().runTransaction(async (tx) => {
+    const existing = await tx.get(ref);
+    if (existing.exists && existing.get("status") === "active") return "already" as const;
+    if (!existing.exists && course.status === "archived") return "archived" as const;
+    if (existing.exists) {
+      tx.update(ref, {
+        status: "active" satisfies EnrollmentStatus,
+        restoredAt: FieldValue.serverTimestamp(),
+        restoredBy: actor.uid,
+        revokedAt: null,
+        revokedBy: null,
+        history: FieldValue.arrayUnion(historyEvent("restored", actor.uid)),
+      });
+      return "restored" as const;
+    }
+    tx.create(ref, {
+      id: ref.id,
+      studentId: student.uid,
+      courseId: course.id,
+      status: "active" satisfies EnrollmentStatus,
+      enrolledAt: FieldValue.serverTimestamp(),
+      enrolledBy: actor.uid,
+      revokedAt: null,
+      revokedBy: null,
+      // Fee snapshot: later course price changes do not alter this student's balance.
+      agreedFee: course.price,
+      currency: DEFAULT_CURRENCY,
+      history: [historyEvent("enrolled", actor.uid)],
+    });
+    return "created" as const;
+  });
+  if (outcome === "already") throw new AccessError("This student is already enrolled.");
+  if (outcome === "archived") {
+    throw new AccessError("This course is archived and closed to new enrollments. Restore it to draft or published first.");
+  }
+  await writeAudit(actor, {
+    action: outcome === "created" ? "enrollment.create" : "enrollment.restore",
+    targetType: "enrollment",
+    targetId: ref.id,
+    summary: `${outcome === "created" ? "Enrolled" : "Restored access for"} ${student.email ?? student.uid} in "${course.title}"`,
+  });
+  return outcome;
+}
 
 export async function enrollStudentByEmail(courseId: string, emailInput: unknown): Promise<ActionResult<{ name: string }>> {
   return runAction("enrollStudentByEmail", async () => {
@@ -643,7 +821,7 @@ export async function enrollStudentByEmail(courseId: string, emailInput: unknown
       throw new AccessError("Please fix the highlighted fields.", { email: "Enter a valid email address." });
     }
 
-    let student;
+    let student: AdminAuthUser;
     try {
       student = await getAdminAuth().getUserByEmail(email);
     } catch (error) {
@@ -654,31 +832,28 @@ export async function enrollStudentByEmail(courseId: string, emailInput: unknown
       }
       throw error;
     }
-    const claim = student.customClaims?.role;
-    if (typeof claim === "string" && TEACHER_CLAIMS.includes(claim)) {
-      throw new AccessError("That account belongs to a teacher, not a student.");
-    }
-    if (student.disabled) throw new AccessError("That account is disabled.");
-
-    const ref = col("enrollments").doc(enrollmentId(course.id, student.uid));
-    const outcome = await db().runTransaction(async (tx) => {
-      const existing = await tx.get(ref);
-      if (existing.exists && existing.get("status") === "active") return "already" as const;
-      tx.set(ref, {
-        id: ref.id,
-        studentId: student.uid,
-        courseId: course.id,
-        status: "active" satisfies EnrollmentStatus,
-        enrolledAt: FieldValue.serverTimestamp(),
-        enrolledBy: user.uid,
-        revokedAt: null,
-        revokedBy: null,
-      });
-      return existing.exists ? ("restored" as const) : ("created" as const);
-    });
-    if (outcome === "already") throw new AccessError("This student is already enrolled.");
+    assertStudentAccount(student);
+    await grantEnrollment(user, course, student);
     refresh();
     return { name: student.displayName || email };
+  });
+}
+
+/** Enrolls a known student (from the student profile page). */
+export async function enrollStudentById(courseId: string, studentId: unknown): Promise<ActionResult> {
+  return runAction("enrollStudentById", async () => {
+    const { user, course } = await authorizeTeacherForCourse(courseId);
+    if (!isValidId(studentId)) throw new AccessError("That student could not be found.");
+    let student: AdminAuthUser;
+    try {
+      student = await getAdminAuth().getUser(studentId);
+    } catch {
+      throw new AccessError("That student could not be found.");
+    }
+    assertStudentAccount(student);
+    await grantEnrollment(user, course, student);
+    refresh();
+    return null;
   });
 }
 
@@ -696,13 +871,31 @@ export async function setEnrollmentStatus(
     if (!snapshot.exists || snapshot.get("courseId") !== course.id) {
       throw new AccessError("That enrollment could not be found.");
     }
+    if (snapshot.get("status") === status) return null;
     await ref.update(
       status === "revoked"
-        ? { status, revokedAt: FieldValue.serverTimestamp(), revokedBy: user.uid }
-        : { status, enrolledAt: FieldValue.serverTimestamp(), enrolledBy: user.uid, revokedAt: null, revokedBy: null },
+        ? {
+            status,
+            revokedAt: FieldValue.serverTimestamp(),
+            revokedBy: user.uid,
+            history: FieldValue.arrayUnion(historyEvent("revoked", user.uid)),
+          }
+        : {
+            status,
+            restoredAt: FieldValue.serverTimestamp(),
+            restoredBy: user.uid,
+            revokedAt: null,
+            revokedBy: null,
+            history: FieldValue.arrayUnion(historyEvent("restored", user.uid)),
+          },
     );
+    await writeAudit(user, {
+      action: status === "revoked" ? "enrollment.revoke" : "enrollment.restore",
+      targetType: "enrollment",
+      targetId: ref.id,
+      summary: `${status === "revoked" ? "Revoked" : "Restored"} access to "${course.title}" for student ${studentId}`,
+    });
     refresh();
     return null;
   });
 }
-

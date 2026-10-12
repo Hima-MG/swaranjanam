@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, Users } from "lucide-react";
+import { ArrowLeft, ExternalLink, Eye, Users } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -7,10 +7,10 @@ import { Suspense } from "react";
 import { CourseCatalogForm } from "@/components/lms/teacher/course-catalog-form";
 import { CourseDetailsForm } from "@/components/lms/teacher/course-details-form";
 import { CourseStatusControl } from "@/components/lms/teacher/course-status-control";
+import { DuplicateCourseButton } from "@/components/lms/teacher/duplicate-course-button";
 import { OutlineEditor } from "@/components/lms/teacher/outline-editor";
 import { ThumbnailUploader } from "@/components/lms/teacher/thumbnail-uploader";
 import { Button } from "@/components/ui/button";
-import { Container } from "@/components/ui/container";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { getCourseForEditing } from "@/lib/lms/server/teacher";
@@ -31,7 +31,7 @@ async function CourseEditor({ params }: { params: Params }) {
     <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-4">
         <Link
-          href="/teacher"
+          href="/teacher/courses"
           className="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-maroon"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
@@ -59,6 +59,13 @@ async function CourseEditor({ params }: { params: Params }) {
                 </Link>
               </Button>
             )}
+            <Button asChild variant="ghost" size="sm">
+              <Link href={`/teacher/courses/${course.id}/preview`}>
+                <Eye data-icon="inline-start" />
+                Preview
+              </Link>
+            </Button>
+            <DuplicateCourseButton courseId={course.id} title={course.title} />
             <Button asChild variant="outline" size="sm">
               <Link href={`/teacher/courses/${course.id}/students`}>
                 <Users data-icon="inline-start" />
@@ -111,10 +118,10 @@ async function CourseEditor({ params }: { params: Params }) {
 
 export default function TeacherCoursePage({ params }: PageProps<"/teacher/courses/[courseId]">) {
   return (
-    <Container className="py-10 sm:py-14">
+    <>
       <Suspense fallback={<LoadingState label="Loading course…" />}>
         <CourseEditor params={params} />
       </Suspense>
-    </Container>
+    </>
   );
 }

@@ -15,6 +15,7 @@ import {
   summarizeLesson,
 } from "@/lib/lms/server/db";
 import {
+  isOpenToEnrolledStudents,
   progressId,
   type CourseRecord,
   type EnrollmentRecord,
@@ -100,7 +101,7 @@ export async function getStudentOverview(user: SessionUser): Promise<StudentOver
   const lessonsByCourse = new Map<string, LessonRecord[]>();
   for (const enrollment of enrollments) {
     const course = courses.get(enrollment.courseId);
-    if (!course || course.status !== "published") {
+    if (!course || !isOpenToEnrolledStudents(course.status)) {
       unavailableCount += 1;
       continue;
     }

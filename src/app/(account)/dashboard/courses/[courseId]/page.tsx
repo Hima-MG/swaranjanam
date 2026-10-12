@@ -7,6 +7,8 @@ import { Suspense } from "react";
 import { LmsThumbnail } from "@/components/lms/lms-thumbnail";
 import { ProgressBar } from "@/components/lms/progress-bar";
 import { CourseOutlineNav } from "@/components/lms/student/course-outline-nav";
+import { ReviewForm } from "@/components/lms/student/review-form";
+import { getOwnReview } from "@/lib/lms/server/feedback";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -23,6 +25,7 @@ async function StudentCourse({ params }: { params: Params }) {
   // Enrollment and publication are verified before any content is returned.
   const data = await getStudentCourse(user, courseId);
   if (!data) notFound();
+  const review = await getOwnReview(user, data.course.id);
   const { course, outline, progress, nextLessonId } = data;
 
   return (
@@ -79,6 +82,13 @@ async function StudentCourse({ params }: { params: Params }) {
         ) : (
           <CourseOutlineNav courseId={course.id} outline={outline} />
         )}
+      </section>
+
+      <section aria-labelledby="review" className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft">
+        <h2 id="review" className="type-h3">
+          Review this course
+        </h2>
+        <ReviewForm courseId={course.id} existing={review} />
       </section>
     </div>
   );

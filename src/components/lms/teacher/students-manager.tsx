@@ -1,6 +1,7 @@
 "use client";
 
 import { UserPlus } from "lucide-react";
+import Link from "next/link";
 import { useRef } from "react";
 
 import { enrollStudentByEmail, setEnrollmentStatus } from "@/app/(account)/teacher/actions";
@@ -100,7 +101,9 @@ export function StudentsTable({ courseId, students }: { courseId: string; studen
               return (
                 <tr key={enrollment.id} className="border-t border-border">
                   <td className="px-5 py-3">
-                    <span className="block font-medium text-brown">{name}</span>
+                    <Link href={`/teacher/students/${enrollment.studentId}`} className="block font-medium text-brown hover:text-maroon hover:underline">
+                      {name}
+                    </Link>
                     {email && <span className="block break-all text-xs text-muted-foreground">{email}</span>}
                   </td>
                   <td className="px-5 py-3">

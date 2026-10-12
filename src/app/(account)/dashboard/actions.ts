@@ -12,6 +12,11 @@ import { isValidId } from "@/lib/lms/validation";
 // and that the lesson belongs to the course. Students can only ever write
 // their own progress (the document id is derived from the session uid).
 
+/** Student activity signal for the teacher dashboard (active/inactive learners). */
+function touchActivity(uid: string) {
+  return col("users").doc(uid).set({ lastActiveAt: FieldValue.serverTimestamp() }, { merge: true });
+}
+
 async function assertLessonInCourse(courseId: string, lessonId: unknown): Promise<string> {
   if (!isValidId(lessonId)) throw new AccessError("That lesson could not be found.");
   const lesson = await col("lessons").doc(lessonId).get();
@@ -42,6 +47,7 @@ export async function setLessonCompleted(
         },
         { merge: true },
       );
+    await touchActivity(user.uid);
     refresh();
     return null;
   });
@@ -58,6 +64,7 @@ export async function recordLessonAccess(courseId: string, lessonId: string): Pr
         { studentId: user.uid, courseId: course.id, lessonId: id, lastAccessedAt: FieldValue.serverTimestamp() },
         { merge: true },
       );
+    await touchActivity(user.uid);
     return null;
   });
 }

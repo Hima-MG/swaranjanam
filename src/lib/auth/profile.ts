@@ -64,6 +64,18 @@ export async function ensureUserProfile(input: NewProfileInput): Promise<void> {
   });
 }
 
+/** Records a successful sign-in (teacher dashboard "last activity"). Best effort. */
+export async function recordSignIn(uid: string): Promise<void> {
+  try {
+    await getAdminDb()
+      .collection(USERS_COLLECTION)
+      .doc(uid)
+      .set({ lastLoginAt: FieldValue.serverTimestamp() }, { merge: true });
+  } catch (error) {
+    console.error("[auth] could not record sign-in:", (error as Error)?.name);
+  }
+}
+
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const snapshot = await getAdminDb().collection(USERS_COLLECTION).doc(uid).get();
   return snapshot.exists ? (snapshot.data() as UserProfile) : null;

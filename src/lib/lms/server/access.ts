@@ -7,14 +7,23 @@ import { getSession, type SessionUser } from "@/lib/auth/session";
 import { AdminConfigError } from "@/lib/firebase/admin";
 import { col, mapEnrollment, readCourse } from "@/lib/lms/server/db";
 import { MediaConfigError, MediaValidationError } from "@/lib/media/cloudinary";
-import { enrollmentId, type ActionResult, type CourseRecord, type EnrollmentRecord } from "@/lib/lms/types";
+import {
+  enrollmentId,
+  isOpenToEnrolledStudents,
+  type ActionResult,
+  type CourseRecord,
+  type EnrollmentRecord,
+} from "@/lib/lms/types";
 import { isValidId, type FieldErrors } from "@/lib/lms/validation";
 
 // Authorisation for every LMS read and mutation. The Admin SDK bypasses
 // Firestore security rules, so these checks ARE the security boundary:
-//   * teachers may act only on courses whose `teacherIds` include them;
+//   * the teacher role (custom claim, granted only by scripts/set-role.mjs)
+//     is the academy administrator: any verified teacher may manage every
+//     course, student and payment. `teacherIds` on a course records its
+//     instructors for display; it does not restrict access;
 //   * students may read lesson content only with an active enrollment in a
-//     published course.
+//     published course, and only ever their own private records.
 
 /** A refusal whose message is safe to show to the user. */
 export class AccessError extends Error {
@@ -37,18 +46,18 @@ export async function requireActionUser(role: Role): Promise<SessionUser> {
   return user;
 }
 
-export function isCourseTeacher(user: SessionUser, course: CourseRecord): boolean {
-  return user.role === "teacher" && course.teacherIds.includes(user.uid);
+/** Teachers administer the whole academy (see the note above). */
+export function canManageCourses(user: SessionUser): boolean {
+  return user.role === "teacher";
 }
 
-/** Loads a course the teacher manages, or null (callers render notFound / return an error). */
+/** Loads a course for a teacher, or null (callers render notFound / return an error). */
 export async function getManagedCourse(user: SessionUser, courseId: string): Promise<CourseRecord | null> {
-  if (!isValidId(courseId)) return null;
-  const course = await readCourse(courseId);
-  return course && isCourseTeacher(user, course) ? course : null;
+  if (!isValidId(courseId) || !canManageCourses(user)) return null;
+  return readCourse(courseId);
 }
 
-/** For teacher Server Actions: session + role + course assignment. */
+/** For teacher Server Actions: verified session + teacher role + existing course. */
 export async function authorizeTeacherForCourse(courseId: unknown) {
   const user = await requireActionUser("teacher");
   if (!isValidId(courseId)) throw new AccessError(NOT_FOUND);
@@ -64,8 +73,8 @@ export async function getActiveEnrollment(studentId: string, courseId: string): 
 }
 
 /**
- * Student access to a course's content: active enrollment AND published
- * course. Returns null otherwise; it never reveals which check failed.
+ * Student access to a course's content: active enrollment AND a published
+ * (or archived) course. Returns null otherwise; it never reveals which check failed.
  */
 export async function getStudentCourseAccess(user: SessionUser, courseId: string) {
   if (user.role !== "student" || !isValidId(courseId)) return null;
@@ -73,7 +82,7 @@ export async function getStudentCourseAccess(user: SessionUser, courseId: string
     readCourse(courseId),
     getActiveEnrollment(user.uid, courseId),
   ]);
-  if (!course || !enrollment || course.status !== "published") return null;
+  if (!course || !enrollment || !isOpenToEnrolledStudents(course.status)) return null;
   return { course, enrollment };
 }
 

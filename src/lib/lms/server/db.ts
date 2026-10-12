@@ -11,6 +11,7 @@ import {
 } from "@/types/course";
 import {
   COURSE_STATUSES,
+  DEFAULT_CURRENCY,
   ENROLLMENT_STATUSES,
   LANGUAGES,
   RESOURCE_TYPES,
@@ -36,6 +37,12 @@ export const COLLECTIONS = {
   enrollments: "enrollments",
   lessonProgress: "lessonProgress",
   users: "users",
+  payments: "payments",
+  submissions: "submissions",
+  reviews: "reviews",
+  announcements: "announcements",
+  liveClasses: "liveClasses",
+  auditLogs: "auditLogs",
 } as const;
 
 export function db() {
@@ -195,6 +202,8 @@ export function mapEnrollment(snapshot: DocumentSnapshot<DocumentData>): Enrollm
     enrolledAt: toIso(data.enrolledAt),
     enrolledBy: str(data.enrolledBy) || null,
     revokedAt: toIso(data.revokedAt),
+    agreedFee: typeof data.agreedFee === "number" && Number.isFinite(data.agreedFee) && data.agreedFee >= 0 ? data.agreedFee : null,
+    currency: str(data.currency) || DEFAULT_CURRENCY,
   };
 }
 

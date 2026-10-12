@@ -6,7 +6,6 @@ import { Suspense } from "react";
 
 import { EnrollStudentForm, StudentsTable } from "@/components/lms/teacher/students-manager";
 import { CourseStatusBadge } from "@/components/lms/teacher/course-status-badge";
-import { Container } from "@/components/ui/container";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { listCourseStudents } from "@/lib/lms/server/teacher";
@@ -64,10 +63,10 @@ async function CourseStudents({ params }: { params: Params }) {
 
 export default function CourseStudentsPage({ params }: PageProps<"/teacher/courses/[courseId]/students">) {
   return (
-    <Container size="md" className="py-10 sm:py-14">
+    <div className="max-w-6xl">
       <Suspense fallback={<LoadingState label="Loading students…" />}>
         <CourseStudents params={params} />
       </Suspense>
-    </Container>
+    </div>
   );
 }

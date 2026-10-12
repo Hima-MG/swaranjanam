@@ -9,6 +9,10 @@ import type { CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/typ
 //   lessons/{lessonId}                   — courseId, moduleId, order, resources[]
 //   enrollments/{courseId}_{studentId}   — deterministic id: one per student+course
 //   lessonProgress/{studentId}_{lessonId}
+//   payments/{autoId}                    — payment records (separate from access)
+//   submissions/{autoId}                 — student practice recordings + teacher feedback
+//   reviews/{courseId}_{studentId}       — one course review per student, moderated
+//   auditLogs/{autoId}                   — who did what, for sensitive teacher actions
 //
 // Timestamps are Firestore Timestamps in the database and ISO strings once
 // they leave the data layer, so records can be passed to Client Components.
@@ -21,8 +25,17 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
   ml: "മലയാളം",
 };
 
-export const COURSE_STATUSES = ["draft", "published"] as const;
+export const COURSE_STATUSES = ["draft", "published", "archived"] as const;
 export type CourseStatus = (typeof COURSE_STATUSES)[number];
+
+/**
+ * Statuses in which ENROLLED students may open a course. Archived courses are
+ * hidden from the public catalogue and closed to new enrollments, but
+ * students who already have access keep it. Drafts are never visible.
+ */
+export function isOpenToEnrolledStudents(status: CourseStatus): boolean {
+  return status === "published" || status === "archived";
+}
 
 export const ENROLLMENT_STATUSES = ["active", "revoked"] as const;
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUSES)[number];
@@ -131,6 +144,13 @@ export interface EnrollmentRecord {
   enrolledAt: string | null;
   enrolledBy: string | null;
   revokedAt: string | null;
+  /**
+   * Fee agreed for this enrollment, in whole currency units. Snapshot of the
+   * course price at enrollment; teachers may adjust it (discounts,
+   * scholarships). null = no fee agreed. Independent of access status.
+   */
+  agreedFee: number | null;
+  currency: string;
 }
 
 export interface LessonProgressRecord {
@@ -140,6 +160,158 @@ export interface LessonProgressRecord {
   completed: boolean;
   completedAt: string | null;
   lastAccessedAt: string | null;
+}
+
+export const DEFAULT_CURRENCY = "INR";
+
+// --- Payments -------------------------------------------------------------------
+//
+// Payment status is independent of enrollment/access status. Only records that
+// are `paid` AND `verified` count as received revenue. Manual records are
+// verified by the teacher who records them (offline payments they have
+// confirmed). Gateway records (e.g. Razorpay, future) must only ever be marked
+// verified by server-side signature/webhook verification — never by the client.
+
+export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export const PAYMENT_METHODS = ["upi", "bank_transfer", "cash", "card", "cheque", "other"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number] | "gateway";
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  upi: "UPI",
+  bank_transfer: "Bank transfer",
+  cash: "Cash",
+  card: "Card (offline)",
+  cheque: "Cheque",
+  other: "Other",
+  gateway: "Online gateway",
+};
+
+/** Allowed manual status changes. Refunds only apply to received payments. */
+export const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  pending: ["paid", "failed"],
+  paid: ["refunded"],
+  failed: ["pending"],
+  refunded: [],
+};
+
+export interface PaymentRecord {
+  id: string;
+  studentId: string;
+  courseId: string;
+  enrollmentId: string;
+  /** Amount in the smallest currency unit (paise for INR). */
+  amountMinor: number;
+  currency: string;
+  method: PaymentMethod;
+  reference: string | null;
+  /** When the payment was made (date supplied by the teacher, or by the gateway). */
+  paidAt: string | null;
+  status: PaymentStatus;
+  verified: boolean;
+  source: "manual" | "gateway";
+  notes: string | null;
+  createdBy: string | null;
+  createdByEmail: string | null;
+  createdAt: string | null;
+  updatedBy: string | null;
+  updatedByEmail: string | null;
+  updatedAt: string | null;
+  history: { at: string | null; byEmail: string | null; change: string }[];
+}
+
+/** Counts towards received revenue. */
+export function isReceived(payment: Pick<PaymentRecord, "status" | "verified">): boolean {
+  return payment.status === "paid" && payment.verified;
+}
+
+// --- Practice submissions ------------------------------------------------------
+//
+// A student uploads an audio/video recording for a course (optionally a
+// specific lesson). Teachers give feedback and mark it reviewed or ask for a
+// revision; a resubmission adds a new attempt, keeping the full history.
+// Students can only ever read their own submissions (enforced on the server).
+
+export const SUBMISSION_STATUSES = ["pending_review", "reviewed", "needs_revision"] as const;
+export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
+
+export const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
+  pending_review: "Pending review",
+  reviewed: "Reviewed",
+  needs_revision: "Needs revision",
+};
+
+export interface SubmissionAttempt {
+  number: number;
+  kind: "audio" | "video";
+  url: string;
+  publicId: string;
+  format: string | null;
+  bytes: number | null;
+  fileName: string | null;
+  note: string | null;
+  submittedAt: string | null;
+}
+
+export interface SubmissionFeedback {
+  attempt: number;
+  status: Exclude<SubmissionStatus, "pending_review">;
+  text: string;
+  byEmail: string | null;
+  byName: string | null;
+  at: string | null;
+}
+
+export interface SubmissionRecord {
+  id: string;
+  studentId: string;
+  courseId: string;
+  moduleId: string | null;
+  lessonId: string | null;
+  title: string;
+  status: SubmissionStatus;
+  attempts: SubmissionAttempt[];
+  feedback: SubmissionFeedback[];
+  createdAt: string | null;
+  lastSubmittedAt: string | null;
+  reviewedAt: string | null;
+}
+
+// --- Course reviews ---------------------------------------------------------------
+
+export const REVIEW_STATUSES = ["pending", "approved", "hidden"] as const;
+export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
+export interface ReviewRecord {
+  id: string;
+  courseId: string;
+  studentId: string;
+  /** 1–5, as submitted by the student. */
+  rating: number;
+  comment: string;
+  status: ReviewStatus;
+  createdAt: string | null;
+  updatedAt: string | null;
+  moderatedByEmail: string | null;
+  moderatedAt: string | null;
+  moderationNote: string | null;
+}
+
+export function reviewId(courseId: string, studentId: string): string {
+  return `${courseId}_${studentId}`;
+}
+
+/** One sensitive teacher action. Never contains secrets, tokens or payment card data. */
+export interface AuditEntry {
+  id: string;
+  action: string;
+  actorId: string;
+  actorEmail: string | null;
+  targetType: "course" | "enrollment" | "student" | "payment" | "review" | "submission" | "announcement" | "settings";
+  targetId: string;
+  summary: string;
+  at: string | null;
 }
 
 /** Result shape returned by every Server Action. */

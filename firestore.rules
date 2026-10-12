@@ -9,6 +9,12 @@ rules_version = '2';
 //   lessons/{lessonId}                   courseId, moduleId, order, resources[]
 //   enrollments/{courseId}_{studentId}   status: active | revoked
 //   lessonProgress/{studentId}_{lessonId}
+//   payments/{autoId}                    teacher-only (server); no client access
+//   submissions/{autoId}                 server only; students see their own via the app
+//   reviews/{courseId}_{studentId}       server only; moderated by teachers
+//   announcements/{autoId}               server only; students see theirs via the app
+//   liveClasses/{autoId}                 server only; students see their own via the app
+//   auditLogs/{autoId}                   teacher-only (server); no client access
 //
 // Principles:
 //   * Deny by default.
@@ -19,9 +25,10 @@ rules_version = '2';
 //   * Reads are narrowly scoped so that even a direct client SDK call can
 //     only see what the server would show that user. Lesson documents carry
 //     resource URLs, so reading them requires an active enrollment in a
-//     published course (or being an assigned teacher).
+//     published course, or the teacher role.
 //   * The teacher role is the `role` custom claim ("teacher", or the legacy
-//     "admin"), set only by trusted tooling (scripts/set-role.mjs).
+//     "admin"), set only by trusted tooling (scripts/set-role.mjs). Teachers
+//     administer the whole academy: any teacher may read any course.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -39,9 +46,7 @@ service cloud.firestore {
     }
 
     function teachesCourse(courseId) {
-      return isTeacher()
-        && exists(/databases/$(database)/documents/courses/$(courseId))
-        && request.auth.uid in course(courseId).teacherIds;
+      return isTeacher() && exists(/databases/$(database)/documents/courses/$(courseId));
     }
 
     function enrolledIn(courseId) {
@@ -49,7 +54,7 @@ service cloud.firestore {
       return isSignedIn()
         && exists(path)
         && get(path).data.status == "active"
-        && course(courseId).status == "published";
+        && course(courseId).status in ["published", "archived"];
     }
 
     match /users/{uid} {

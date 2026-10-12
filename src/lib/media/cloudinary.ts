@@ -80,14 +80,20 @@ export interface UploadTicket {
   maxBytes: number;
 }
 
+/** Folder for one student's practice submissions. */
+export function submissionFolder(studentId: string): string {
+  if (!SAFE_SEGMENT.test(studentId)) throw new MediaValidationError("Invalid student id.");
+  return `${readConfig().rootFolder}/submissions/${studentId}`;
+}
+
 /**
- * Signs a single upload. Callers must have already authorised the teacher for
- * `courseId`. Signatures are valid for one hour (Cloudinary rejects older timestamps).
+ * Signs a single upload into `prefix` (a folder ending in "/"). Signatures are
+ * valid for one hour (Cloudinary rejects older timestamps).
  */
-export function createUploadTicket(courseId: string, kind: UploadKind, purpose: "thumbnail" | "resource"): UploadTicket {
+function ticketFor(prefix: string, kind: UploadKind): UploadTicket {
   const { cloudName, apiKey, apiSecret } = readConfig();
   const rule = UPLOAD_RULES[kind];
-  const publicId = `${courseFolder(courseId)}/${purpose}s/${randomUUID()}`;
+  const publicId = `${prefix}${randomUUID()}`;
   const params = {
     public_id: publicId,
     timestamp: Math.floor(Date.now() / 1000),
@@ -108,6 +114,16 @@ export function createUploadTicket(courseId: string, kind: UploadKind, purpose: 
     resourceType: rule.resourceType,
     maxBytes: rule.maxBytes,
   };
+}
+
+/** Course media. Callers must have already authorised the teacher for `courseId`. */
+export function createUploadTicket(courseId: string, kind: UploadKind, purpose: "thumbnail" | "resource"): UploadTicket {
+  return ticketFor(`${courseFolder(courseId)}/${purpose}s/`, kind);
+}
+
+/** A student's practice recording. Callers must have authorised the student for the course. */
+export function createSubmissionUploadTicket(studentId: string, kind: "audio" | "video"): UploadTicket {
+  return ticketFor(`${submissionFolder(studentId)}/`, kind);
 }
 
 /** What the browser reports back after a successful upload. Treated as untrusted. */
@@ -133,16 +149,24 @@ function adminAuthHeader(apiKey: string, apiSecret: string) {
  * Confirms an upload is genuine, belongs to this course, and meets the rules
  * for `kind`. Deletes the asset and throws MediaValidationError otherwise.
  */
-export async function verifyUploadedAsset(
+export function verifyUploadedAsset(
   courseId: string,
   kind: UploadKind,
   purpose: "thumbnail" | "resource",
   receipt: UploadReceipt,
 ): Promise<VerifiedAsset> {
+  return verifyInFolder(`${courseFolder(courseId)}/${purpose}s/`, kind, receipt);
+}
+
+/** Same checks for a student's practice upload (must be in that student's folder). */
+export function verifySubmissionAsset(studentId: string, kind: "audio" | "video", receipt: UploadReceipt): Promise<VerifiedAsset> {
+  return verifyInFolder(`${submissionFolder(studentId)}/`, kind, receipt);
+}
+
+async function verifyInFolder(expectedPrefix: string, kind: UploadKind, receipt: UploadReceipt): Promise<VerifiedAsset> {
   const { cloudName, apiKey, apiSecret } = readConfig();
   const rule = UPLOAD_RULES[kind];
 
-  const expectedPrefix = `${courseFolder(courseId)}/${purpose}s/`;
   if (
     typeof receipt.publicId !== "string" ||
     !receipt.publicId.startsWith(expectedPrefix) ||
