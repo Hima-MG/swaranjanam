@@ -1,7 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 
-import { CancelClassDialog, ClassFormDialog, RecordOutcomeDialog } from "@/components/lms/teacher/class-controls";
+import { CancelClassDialog, ClassFormDialog, RecordOutcomeDialog, type SchedulablePackage } from "@/components/lms/teacher/class-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
@@ -10,7 +10,15 @@ import type { TeacherClassRow } from "@/lib/lms/server/classes";
 const ATTENDANCE_LABELS = { attended: "Attended", absent: "Absent", unknown: "Attendance not recorded" } as const;
 
 /** One class in the teacher's Classes list, with its actions. */
-export function ClassListItem({ item: c, students }: { item: TeacherClassRow; students: { uid: string; label: string }[] }) {
+export function ClassListItem({
+  item: c,
+  students,
+  packages = [],
+}: {
+  item: TeacherClassRow;
+  students: { uid: string; label: string }[];
+  packages?: SchedulablePackage[];
+}) {
   const when = formatClassTime(c.startAt, c.endAt);
   return (
     <li className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-soft lg:flex-row lg:items-start lg:justify-between">
@@ -21,6 +29,11 @@ export function ClassListItem({ item: c, students }: { item: TeacherClassRow; st
             {CLASS_STATUS_LABELS[c.status]}
           </Badge>
           {c.needsOutcome && <Badge variant="outline">Ended — outcome not recorded</Badge>}
+          {c.packageId && (
+            <Link href={`/teacher/packages/${c.packageId}`} className="text-xs font-semibold text-maroon hover:underline">
+              Package credit
+            </Link>
+          )}
         </div>
         <p className="text-sm text-brown">{when}</p>
         <p className="text-sm text-muted-foreground">
@@ -31,6 +44,7 @@ export function ClassListItem({ item: c, students }: { item: TeacherClassRow; st
         </p>
         {c.notes && <p className="text-sm whitespace-pre-line text-muted-foreground">Notes: {c.notes}</p>}
         {c.status === "cancelled" && c.cancelReason && <p className="text-sm text-muted-foreground">Cancelled: {c.cancelReason}</p>}
+        {c.status === "cancelled" && c.packageId && <p className="text-xs text-muted-foreground">No credit used — the class carries forward.</p>}
         {c.status === "completed" && (
           <p className="text-sm text-muted-foreground">
             {c.attendance ? ATTENDANCE_LABELS[c.attendance] : "Attendance not recorded"}
@@ -48,8 +62,8 @@ export function ClassListItem({ item: c, students }: { item: TeacherClassRow; st
                 Open Meet
               </a>
             </Button>
-            <ClassFormDialog students={students} existing={c} />
-            {c.started && <RecordOutcomeDialog classId={c.id} title={c.title} />}
+            <ClassFormDialog students={students} existing={c} packages={packages} />
+            {c.started && <RecordOutcomeDialog classId={c.id} title={c.title} packageLinked={Boolean(c.packageId)} />}
             <CancelClassDialog classId={c.id} title={c.title} when={when} />
           </>
         )}

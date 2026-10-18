@@ -4,8 +4,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
+import { CreditsMeter, nextPaymentText, PackageStatusBadge, PaymentStateBadge } from "@/components/lms/billing-display";
 import { ProgressBar } from "@/components/lms/progress-bar";
 import { CourseStatusBadge } from "@/components/lms/teacher/course-status-badge";
+import { AssignPackageDialog } from "@/components/lms/teacher/package-controls";
 import { EditFeeDialog, PaymentStatusActions, RecordPaymentDialog } from "@/components/lms/teacher/payment-dialogs";
 import { PaymentStatusBadge } from "@/components/lms/teacher/payment-status-badge";
 import { EnrollInCourseForm, EnrollmentAccessControl } from "@/components/lms/teacher/student-enrollment-controls";
@@ -14,7 +16,11 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
+import { PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
+import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
 import { getStudentDetail } from "@/lib/lms/server/admin";
+import { getBillingSettings, getStudentPackagesForTeacher, listPayablePackages, listPlans } from "@/lib/lms/server/billing";
+import { listClassesForStudent, listStudentOptions } from "@/lib/lms/server/classes";
 import { getStudentPayments } from "@/lib/lms/server/payments";
 import { PAYMENT_METHOD_LABELS } from "@/lib/lms/types";
 
@@ -40,8 +46,18 @@ function BalanceLine({ balance }: { balance?: { balanceMinor: number | null; cur
 async function StudentProfile({ params }: { params: Params }) {
   const { studentId } = await params;
   const teacher = await requireRole("teacher", `/teacher/students/${studentId}`);
-  const [data, money] = await Promise.all([getStudentDetail(teacher, studentId), getStudentPayments(teacher, studentId)]);
+  const [data, money, packages, classes, plans, students, payable, settings] = await Promise.all([
+    getStudentDetail(teacher, studentId),
+    getStudentPayments(teacher, studentId),
+    getStudentPackagesForTeacher(teacher, studentId),
+    listClassesForStudent(teacher, studentId),
+    listPlans(),
+    listStudentOptions(teacher),
+    listPayablePackages(teacher),
+    getBillingSettings(),
+  ]);
   if (!data) notFound();
+  const ownPackageIds = new Set(packages.map((p) => p.id));
   const { student, enrollments, availableCourses } = data;
   const balanceByEnrollment = new Map(money.balances.map((b) => [b.enrollmentId, b]));
   const name = student.displayName ?? student.email ?? "Unnamed student";
@@ -168,6 +184,84 @@ async function StudentProfile({ params }: { params: Params }) {
         )}
       </section>
 
+      <section aria-labelledby="packages" className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="packages" className="type-h3">
+            Packages
+          </h2>
+          <AssignPackageDialog plans={plans} students={students} defaultStudentId={student.uid} />
+        </div>
+        {packages.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">No packages assigned yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {packages.map((p) => {
+              const next = nextPaymentText(p.next, p.currency);
+              return (
+                <li key={p.id} className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-soft">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <Link href={`/teacher/packages/${p.id}`} className="font-semibold text-brown hover:text-maroon hover:underline">
+                        {p.title}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {PACKAGE_TYPE_LABELS[p.type]}
+                        {p.type === "pair" ? ` with ${p.learners.filter((l) => l.studentId !== student.uid).map((l) => l.name).join(", ")}` : ""} · assigned{" "}
+                        {formatDate(p.createdAt)}
+                      </p>
+                    </div>
+                    <span className="flex flex-wrap gap-2">
+                      <PackageStatusBadge status={p.status} />
+                      <PaymentStateBadge state={p.summary.paymentState} />
+                    </span>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <CreditsMeter used={p.summary.creditsUsed} total={p.summary.creditsTotal} label={`${p.title} classes used`} />
+                    <p className="text-sm text-brown">
+                      {formatMoney(p.summary.netPaidMinor, p.currency)} paid of {formatMoney(p.summary.dueMinor, p.currency)}
+                      {p.summary.balanceMinor > 0 && (
+                        <span className="block text-xs font-semibold text-maroon">{formatMoney(p.summary.balanceMinor, p.currency)} outstanding</span>
+                      )}
+                    </p>
+                  </div>
+                  {next && <p className="text-xs text-muted-foreground">{next}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="class-history" className="flex flex-col gap-4">
+        <h2 id="class-history" className="type-h3">
+          Classes and attendance
+        </h2>
+        {classes.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">No live classes yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-2xl border border-border bg-card shadow-soft">
+            {classes.map((c) => (
+              <li key={c.id} className="flex flex-col gap-1 px-5 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <span className="min-w-0">
+                  <span className="font-medium text-brown">{c.title}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {formatClassTime(c.startAt, c.endAt)}
+                    {c.packageId ? ` · ${packages.find((p) => p.id === c.packageId)?.title ?? "Package"} credit` : ""}
+                  </span>
+                </span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <Badge variant={c.status === "completed" ? "maroon" : c.status === "scheduled" ? "gold" : "secondary"}>{CLASS_STATUS_LABELS[c.status]}</Badge>
+                  {c.status === "completed" && (
+                    <Badge variant="outline">{c.attendance === "attended" ? "Attended" : c.attendance === "absent" ? "Absent" : "Attendance not recorded"}</Badge>
+                  )}
+                  {c.status === "cancelled" && c.packageId && <span className="text-xs text-muted-foreground">No credit used</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section aria-labelledby="payments" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="payments" className="type-h3">
@@ -175,12 +269,13 @@ async function StudentProfile({ params }: { params: Params }) {
           </h2>
           <RecordPaymentDialog
             enrollmentOptions={enrollments.map((e) => ({ id: e.id, label: `${e.courseTitle}${e.status === "revoked" ? " (revoked)" : ""}` }))}
-            defaultEnrollmentId={enrollments.length === 1 ? enrollments[0].id : undefined}
+            packageOptions={payable.filter((p) => ownPackageIds.has(p.id))}
+            methods={settings.methods}
           />
         </div>
         {money.payments.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">
-            {enrollments.length === 0 ? "Enroll the student in a course before recording payments." : "No payments recorded for this student."}
+            {enrollments.length === 0 && packages.length === 0 ? "Assign a package or enroll the student before recording payments." : "No payments recorded for this student."}
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-2xl border border-border bg-card shadow-soft">
@@ -192,6 +287,7 @@ async function StudentProfile({ params }: { params: Params }) {
                     {" "}· {p.courseTitle} · {PAYMENT_METHOD_LABELS[p.method]} · {formatDate(p.paidAt)}
                     {p.reference ? ` · Ref ${p.reference}` : ""}
                   </span>
+                  {p.rejectionReason && <span className="block text-xs text-destructive">Rejected: {p.rejectionReason}</span>}
                   <span className="block text-xs text-muted-foreground">
                     Recorded by {p.createdByEmail ?? "—"} · {formatDateTime(p.createdAt)}
                   </span>

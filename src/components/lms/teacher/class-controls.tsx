@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 export interface EditableClass {
   id: string;
   studentId: string;
+  packageId?: string | null;
   title: string;
   date: string;
   startTime: string;
@@ -40,10 +41,31 @@ function todayInIndia() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 }
 
-/** Schedule a new class, or edit/reschedule an existing scheduled class. */
-export function ClassFormDialog({ students, existing }: { students: { uid: string; label: string }[]; existing?: EditableClass }) {
+export interface SchedulablePackage {
+  id: string;
+  label: string;
+  learnerIds: string[];
+}
+
+/**
+ * Schedule a new class, or edit/reschedule an existing scheduled class.
+ * Optionally bill it to a package: the learners then come from the package
+ * (both learners of a pair), and the server checks that a credit is free.
+ */
+export function ClassFormDialog({
+  students,
+  existing,
+  packages = [],
+}: {
+  students: { uid: string; label: string }[];
+  existing?: EditableClass;
+  packages?: SchedulablePackage[];
+}) {
   const [open, setOpen] = useState(false);
+  const [packageId, setPackageId] = useState("");
   const { pending, error, fieldErrors: e, run, reset } = useServerAction();
+  const chosenPackage = packages.find((p) => p.id === packageId) ?? null;
+  const lockedStudent = Boolean(existing?.packageId);
   const id = existing?.id ?? "new";
   const invalid = (key: string) => (e[key] ? { "aria-invalid": true as const, "aria-describedby": `c-${key}-${id}-error` } : {});
 
@@ -52,7 +74,10 @@ export function ClassFormDialog({ students, existing }: { students: { uid: strin
       open={open}
       onOpenChange={(next) => {
         if (pending) return;
-        if (next) reset();
+        if (next) {
+          reset();
+          setPackageId("");
+        }
         setOpen(next);
       }}
       className="sm:max-w-xl"
@@ -79,7 +104,8 @@ export function ClassFormDialog({ students, existing }: { students: { uid: strin
           event.preventDefault();
           const d = new FormData(event.currentTarget);
           const input = {
-            studentId: d.get("studentId"),
+            packageId: existing ? undefined : d.get("packageId") || undefined,
+            studentId: chosenPackage ? undefined : d.get("studentId"),
             title: d.get("title"),
             date: d.get("date"),
             startTime: d.get("startTime"),
@@ -91,14 +117,43 @@ export function ClassFormDialog({ students, existing }: { students: { uid: strin
         }}
       >
         <fieldset disabled={pending} className="flex flex-col gap-4">
-          <Field id={`c-studentId-${id}`} label="Student" error={e.studentId}>
-            <NativeSelect id={`c-studentId-${id}`} name="studentId" defaultValue={existing?.studentId ?? ""} required {...invalid("studentId")}>
-              <option value="">Choose a student…</option>
-              {students.map((s) => (
-                <option key={s.uid} value={s.uid}>{s.label}</option>
-              ))}
-            </NativeSelect>
-          </Field>
+          {!existing && packages.length > 0 && (
+            <Field
+              id={`c-packageId-${id}`}
+              label="Use a package credit (optional)"
+              error={e.packageId}
+              hint="Only active packages with free credits are listed. A pair package schedules the class for both learners."
+            >
+              <NativeSelect id={`c-packageId-${id}`} name="packageId" value={packageId} onChange={(ev) => setPackageId(ev.target.value)}>
+                <option value="">No package</option>
+                {packages.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </NativeSelect>
+            </Field>
+          )}
+          {chosenPackage ? (
+            <p className="rounded-xl border border-border bg-cream-deep/40 px-3 py-2 text-sm text-brown">
+              Learner{chosenPackage.learnerIds.length > 1 ? "s" : ""}:{" "}
+              {chosenPackage.learnerIds.map((uid) => students.find((s) => s.uid === uid)?.label ?? uid).join(" + ")}
+            </p>
+          ) : lockedStudent ? (
+            <>
+              <input type="hidden" name="studentId" value={existing?.studentId} />
+              <p className="rounded-xl border border-border bg-cream-deep/40 px-3 py-2 text-sm text-brown">
+                {students.find((s) => s.uid === existing?.studentId)?.label ?? "Package learner"} · uses a package credit (the learner cannot be changed)
+              </p>
+            </>
+          ) : (
+            <Field id={`c-studentId-${id}`} label="Student" error={e.studentId}>
+              <NativeSelect id={`c-studentId-${id}`} name="studentId" defaultValue={existing?.studentId ?? ""} required {...invalid("studentId")}>
+                <option value="">Choose a student…</option>
+                {students.map((s) => (
+                  <option key={s.uid} value={s.uid}>{s.label}</option>
+                ))}
+              </NativeSelect>
+            </Field>
+          )}
           <Field id={`c-title-${id}`} label="Class title or subject" error={e.title}>
             <Input id={`c-title-${id}`} name="title" defaultValue={existing?.title} maxLength={120} placeholder="e.g. Varnam practice — Mohanam" required {...invalid("title")} />
           </Field>
@@ -178,7 +233,7 @@ export function CancelClassDialog({ classId, title, when }: { classId: string; t
   );
 }
 
-export function RecordOutcomeDialog({ classId, title }: { classId: string; title: string }) {
+export function RecordOutcomeDialog({ classId, title, packageLinked = false }: { classId: string; title: string; packageLinked?: boolean }) {
   const [open, setOpen] = useState(false);
   const { pending, error, fieldErrors, run, reset } = useServerAction();
   return (
@@ -215,12 +270,19 @@ export function RecordOutcomeDialog({ classId, title }: { classId: string; title
               ["absent", "Absent"],
               ["unknown", "Not sure / not recorded"],
             ] as const
-          ).map(([value, label]) => (
-            <label key={value} className="flex items-center gap-2 text-sm text-brown">
-              <input type="radio" name="attendance" value={value} defaultChecked={value === "attended"} className="size-4 accent-maroon" />
-              {label}
-            </label>
-          ))}
+          )
+            .filter(([value]) => !(packageLinked && value === "unknown"))
+            .map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 text-sm text-brown">
+                <input type="radio" name="attendance" value={value} defaultChecked={value === "attended"} className="size-4 accent-maroon" />
+                {label}
+              </label>
+            ))}
+          {packageLinked && (
+            <p className="text-xs text-muted-foreground">
+              This class uses a package credit: attended and absent both use one credit (once per session, however often you record it).
+            </p>
+          )}
           {fieldErrors.attendance && <p className="text-xs text-destructive">{fieldErrors.attendance}</p>}
         </fieldset>
         <Field id={`outcome-note-${classId}`} label="Teacher note (private — never shown to the student)">

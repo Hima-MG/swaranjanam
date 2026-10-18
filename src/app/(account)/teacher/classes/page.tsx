@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { LoadingState } from "@/components/ui/loading-state";
 import { NativeSelect } from "@/components/ui/native-select";
 import { requireRole } from "@/lib/auth/session";
+import { listSchedulablePackages } from "@/lib/lms/server/billing";
 import { listClassesForTeacher, parseClassFilters, type ClassFilters, type ClassTab } from "@/lib/lms/server/classes";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +37,7 @@ function href(filters: ClassFilters, overrides: Partial<ClassFilters>) {
 async function Classes({ searchParams }: { searchParams: SearchParams }) {
   const teacher = await requireRole("teacher", "/teacher/classes");
   const filters = parseClassFilters(await searchParams);
-  const { rows, counts, students } = await listClassesForTeacher(teacher, filters);
+  const [{ rows, counts, students }, packages] = await Promise.all([listClassesForTeacher(teacher, filters), listSchedulablePackages(teacher)]);
   const filtered = Boolean(filters.student || filters.from || filters.to);
 
   return (
@@ -57,7 +58,7 @@ async function Classes({ searchParams }: { searchParams: SearchParams }) {
             </Link>
           ))}
         </nav>
-        <ClassFormDialog students={students} />
+        <ClassFormDialog students={students} packages={packages} />
       </div>
       {students.length === 0 && (
         <p className="text-sm text-muted-foreground">No students have registered yet. Classes can be scheduled once a student creates an account.</p>
@@ -108,7 +109,7 @@ async function Classes({ searchParams }: { searchParams: SearchParams }) {
       ) : (
         <ul className="flex flex-col gap-3">
           {rows.map((c) => (
-            <ClassListItem key={c.id} item={c} students={students} />
+            <ClassListItem key={c.id} item={c} students={students} packages={packages} />
           ))}
         </ul>
       )}
@@ -121,7 +122,7 @@ export default function TeacherClassesPage({ searchParams }: PageProps<"/teacher
     <>
       <TeacherPageHeader
         title="Classes"
-        description="Live one-to-one classes on Google Meet. All times are India Standard Time."
+        description="Live classes on Google Meet. Classes can use a package credit; all times are India Standard Time."
       />
       <Suspense fallback={<LoadingState label="Loading classes…" />}>
         <Classes searchParams={searchParams} />

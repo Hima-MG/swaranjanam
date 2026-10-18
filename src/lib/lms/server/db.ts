@@ -43,6 +43,14 @@ export const COLLECTIONS = {
   announcements: "announcements",
   liveClasses: "liveClasses",
   auditLogs: "auditLogs",
+  // Billing (see lib/lms/billing.ts and lib/lms/server/billing.ts).
+  pricePlans: "pricePlans",
+  packages: "packages",
+  creditLedger: "creditLedger",
+  billingAdjustments: "billingAdjustments",
+  receipts: "receipts",
+  paymentReferences: "paymentReferences",
+  settings: "settings",
 } as const;
 
 export function db() {

@@ -227,3 +227,13 @@ p:lang(ml),
 li:lang(ml) {
   line-height: 1.85;
 }
+
+/* Receipts print on their own: hide the site header, footer and skip link. */
+@media print {
+  body:has([data-print-root]) > header,
+  body:has([data-print-root]) header.sticky,
+  body:has([data-print-root]) footer,
+  body:has([data-print-root]) a[href="#main"] {
+    display: none !important;
+  }
+}

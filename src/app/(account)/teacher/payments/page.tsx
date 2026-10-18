@@ -15,7 +15,9 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
+import { getBillingSettings, getRevenueReport, listPayablePackages } from "@/lib/lms/server/billing";
 import { listPayments, parsePaymentFilters, type PaymentFilters } from "@/lib/lms/server/payments";
+import { cn } from "@/lib/utils";
 import { PAYMENT_METHOD_LABELS } from "@/lib/lms/types";
 
 export const metadata: Metadata = { title: "Payments · Teacher" };
@@ -37,15 +39,22 @@ function queryString(f: PaymentFilters, overrides: Partial<PaymentFilters> = {})
 
 async function Payments({ searchParams }: { searchParams: SearchParams }) {
   const teacher = await requireRole("teacher", "/teacher/payments");
-  const filters = parsePaymentFilters(await searchParams);
-  const result = await listPayments(teacher, filters);
+  const params = await searchParams;
+  const filters = parsePaymentFilters(params);
+  const period = params.period === "week" ? "week" : "month";
+  const [result, packageOptions, settings, revenue] = await Promise.all([
+    listPayments(teacher, filters),
+    listPayablePackages(teacher),
+    getBillingSettings(),
+    getRevenueReport(teacher, period),
+  ]);
   const { totals } = result;
   const filtered = Boolean(filters.from || filters.to || filters.status !== "any" || filters.course || filters.q);
 
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <RecordPaymentDialog enrollmentOptions={result.enrollmentOptions} />
+        <RecordPaymentDialog enrollmentOptions={result.enrollmentOptions} packageOptions={packageOptions} methods={settings.methods} />
         {result.total > 0 && (
           <Button asChild variant="outline" size="sm">
             <a href={`/api/teacher/payments/export${queryString(filters, { page: 1 })}`} download>
@@ -55,8 +64,8 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
           </Button>
         )}
       </div>
-      {result.enrollmentOptions.length === 0 && (
-        <p className="text-sm text-muted-foreground">Payments are recorded against an enrollment. Enroll a student first.</p>
+      {result.enrollmentOptions.length === 0 && packageOptions.length === 0 && (
+        <p className="text-sm text-muted-foreground">Payments are recorded against a package or a course enrollment. Assign a package first.</p>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -67,9 +76,14 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
           icon={IndianRupee}
         />
         <StatCard label="Pending" value={formatMoney(totals.pendingMinor)} detail={`${totals.pendingCount} awaiting confirmation`} icon={Clock} />
-        <StatCard label="Refunded" value={formatMoney(totals.refundedMinor)} detail={`${totals.refundedCount} refund${totals.refundedCount === 1 ? "" : "s"} · ${totals.failedCount} failed`} icon={RotateCcw} />
         <StatCard
-          label="Outstanding balances"
+          label="Refunded"
+          value={formatMoney(totals.refundedMinor + revenue.refundedMinor)}
+          detail={`${totals.refundedCount} full refund${totals.refundedCount === 1 ? "" : "s"} + package refund adjustments · ${totals.failedCount} rejected`}
+          icon={RotateCcw}
+        />
+        <StatCard
+          label="Outstanding (course fees)"
           value={formatMoney(result.outstandingMinor)}
           detail={`${result.outstanding.length} enrollment${result.outstanding.length === 1 ? "" : "s"} with an unpaid agreed fee`}
           icon={AlertCircle}
@@ -91,7 +105,7 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
             <option value="any">Any</option>
             <option value="paid">Paid</option>
             <option value="pending">Pending</option>
-            <option value="failed">Failed</option>
+            <option value="failed">Rejected / failed</option>
             <option value="refunded">Refunded</option>
           </NativeSelect>
         </div>
@@ -156,8 +170,17 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
                       <td className="px-4 py-3">
                         {PAYMENT_METHOD_LABELS[p.method]}
                         <span className="block text-xs break-all text-muted-foreground">{p.reference ?? "No reference"}</span>
+                        {p.payerName && <span className="block text-xs text-muted-foreground">Paid by {p.payerName}</span>}
                       </td>
-                      <td className="px-4 py-3"><PaymentStatusBadge status={p.status} verified={p.verified} /></td>
+                      <td className="px-4 py-3">
+                        <PaymentStatusBadge status={p.status} verified={p.verified} />
+                        {p.rejectionReason && <span className="mt-1 block max-w-48 text-xs text-destructive">{p.rejectionReason}</span>}
+                        {p.receiptId && (
+                          <Link href={`/receipts/${p.receiptId}`} className="mt-1 block text-xs font-semibold text-maroon hover:underline">
+                            Receipt
+                          </Link>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {p.updatedByEmail ?? p.createdByEmail ?? "—"}
                         <span className="block">{formatDateTime(p.updatedAt ?? p.createdAt)}</span>
@@ -207,10 +230,80 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
         )}
       </section>
 
-      <section aria-labelledby="outstanding" className="flex flex-col gap-3">
-        <h2 id="outstanding" className="type-h3">Outstanding balances</h2>
+      <section aria-labelledby="revenue" className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="revenue" className="type-h3">Revenue by {period}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <nav aria-label="Revenue period" className="inline-flex rounded-full border border-border bg-ivory p-1 shadow-soft">
+              {(["month", "week"] as const).map((key) => (
+                <Link
+                  key={key}
+                  href={`/teacher/payments?period=${key}#revenue`}
+                  aria-current={period === key ? "page" : undefined}
+                  className={cn(
+                    "rounded-full px-4 py-1.5 text-sm font-semibold transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                    period === key ? "bg-maroon text-cream" : "text-brown hover:bg-cream-deep",
+                  )}
+                >
+                  {key === "month" ? "Monthly" : "Weekly"}
+                </Link>
+              ))}
+            </nav>
+            <Button asChild variant="outline" size="sm">
+              <a href={`/api/teacher/reports/revenue?period=${period}`} download>
+                <Download data-icon="inline-start" />
+                Revenue CSV
+              </a>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a href="/api/teacher/reports/adjustments" download>
+                <Download data-icon="inline-start" />
+                Refunds & adjustments CSV
+              </a>
+            </Button>
+          </div>
+        </div>
         <p className="text-sm text-muted-foreground">
-          Agreed fee minus verified payments, per enrollment. Enrollments without an agreed fee are not included.
+          Verified payments by payment date, minus refunds by refund date (India time). Pending and rejected payments are never counted.
+        </p>
+        {revenue.rows.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">No verified payments yet.</p>
+        ) : (
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[32rem] text-left text-sm">
+                <caption className="sr-only">Revenue by {period}</caption>
+                <thead className="bg-cream-deep/60 text-xs tracking-wide text-brown-muted uppercase">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-semibold">{period === "month" ? "Month" : "ISO week"}</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Received</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Refunds</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Net</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {revenue.rows.slice(0, 24).map((r) => (
+                    <tr key={r.period} className="border-t border-border">
+                      <td className="px-4 py-3 text-brown">{r.period}</td>
+                      <td className="px-4 py-3 text-right text-brown">
+                        {formatMoney(r.receivedMinor)} <span className="text-xs text-muted-foreground">({r.receivedCount})</span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-brown">{formatMoney(r.refundedMinor)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-brown">{formatMoney(r.netMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="outstanding" className="flex flex-col gap-3">
+        <h2 id="outstanding" className="type-h3">Outstanding course-fee balances (earlier enrollments)</h2>
+        <p className="text-sm text-muted-foreground">
+          Agreed fee minus verified payments, per enrollment. Package balances are on the{" "}
+          <Link href="/teacher/packages" className="font-semibold text-maroon hover:underline">Packages</Link> page; a payment counts towards one or the other, never both.
         </p>
         {result.outstanding.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">

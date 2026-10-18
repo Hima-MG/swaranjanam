@@ -40,6 +40,17 @@ export function mapPayment(snapshot: DocumentSnapshot<DocumentData>): PaymentRec
     studentId: String(d.studentId ?? ""),
     courseId: String(d.courseId ?? ""),
     enrollmentId: String(d.enrollmentId ?? ""),
+    packageId: isValidId(d.packageId) ? d.packageId : null,
+    learnerIds: Array.isArray(d.learnerIds)
+      ? d.learnerIds.filter(isValidId)
+      : isValidId(d.studentId)
+        ? [d.studentId]
+        : [],
+    payerName: typeof d.payerName === "string" && d.payerName ? d.payerName : null,
+    rejectionReason: typeof d.rejectionReason === "string" && d.rejectionReason ? d.rejectionReason : null,
+    verifiedAt: toIso(d.verifiedAt),
+    verifiedByEmail: typeof d.verifiedByEmail === "string" ? d.verifiedByEmail : null,
+    receiptId: typeof d.receiptId === "string" && d.receiptId ? d.receiptId : null,
     amountMinor: Number.isSafeInteger(d.amountMinor) ? d.amountMinor : 0,
     currency: typeof d.currency === "string" ? d.currency : DEFAULT_CURRENCY,
     method: (d.method === "gateway" || (PAYMENT_METHODS as readonly string[]).includes(d.method) ? d.method : "other") as PaymentMethod,
@@ -60,12 +71,14 @@ export function mapPayment(snapshot: DocumentSnapshot<DocumentData>): PaymentRec
 }
 
 const loadPaymentData = cache(async () => {
-  const [paymentsSnap, enrollmentsSnap, coursesSnap, studentsSnap] = await Promise.all([
+  const [paymentsSnap, enrollmentsSnap, coursesSnap, studentsSnap, packagesSnap] = await Promise.all([
     col("payments").get(),
     col("enrollments").get(),
     col("courses").select("title", "slug", "status", "price").get(),
     col("users").where("role", "==", "student").select("displayName", "email").get(),
+    col("packages").select("title").get(),
   ]);
+  const packageTitles = new Map(packagesSnap.docs.map((d) => [d.id, String(d.get("title") ?? "Package")]));
   const payments = paymentsSnap.docs.map(mapPayment).filter((p): p is PaymentRecord => p !== null);
   const enrollments = enrollmentsSnap.docs.map(mapEnrollment).filter((e): e is EnrollmentRecord => e !== null);
   const courses = new Map(
@@ -81,8 +94,14 @@ const loadPaymentData = cache(async () => {
       },
     ]),
   );
-  return { payments, enrollments, courses, students };
+  return { payments, enrollments, courses, students, packageTitles };
 });
+
+/** "Course" column for a payment: the package title for package payments. */
+function paymentTitle(data: Awaited<ReturnType<typeof loadPaymentData>>, p: PaymentRecord): string {
+  if (p.packageId) return `Package: ${data.packageTitles.get(p.packageId) ?? "Package"}`;
+  return data.courses.get(p.courseId)?.title ?? "Deleted course";
+}
 
 export interface EnrollmentBalance {
   enrollmentId: string;
@@ -105,7 +124,7 @@ function balancesFrom(data: Awaited<ReturnType<typeof loadPaymentData>>): Enroll
     .map((e) => {
       const student = data.students.get(e.studentId)!;
       const receivedMinor = data.payments
-        .filter((p) => p.enrollmentId === e.id && isReceived(p))
+        .filter((p) => p.enrollmentId === e.id && p.packageId === null && isReceived(p))
         .reduce((sum, p) => sum + p.amountMinor, 0);
       const feeMinor = e.agreedFee === null ? null : Math.round(e.agreedFee * 100);
       return {
@@ -175,7 +194,7 @@ export async function listPayments(user: SessionUser, filters: PaymentFilters) {
         ...p,
         studentName: student?.name ?? student?.email ?? "Unknown student",
         studentEmail: student?.email ?? null,
-        courseTitle: data.courses.get(p.courseId)?.title ?? "Deleted course",
+        courseTitle: paymentTitle(data, p),
       };
     })
     .filter((p) => {
@@ -229,8 +248,8 @@ export async function getStudentPayments(user: SessionUser, studentId: string) {
   assertTeacher(user);
   const data = await loadPaymentData();
   const payments = data.payments
-    .filter((p) => p.studentId === studentId)
-    .map((p) => ({ ...p, courseTitle: data.courses.get(p.courseId)?.title ?? "Deleted course" }))
+    .filter((p) => p.studentId === studentId || p.learnerIds.includes(studentId))
+    .map((p) => ({ ...p, courseTitle: paymentTitle(data, p) }))
     .sort((a, b) => (b.paidAt ?? b.createdAt ?? "").localeCompare(a.paidAt ?? a.createdAt ?? ""));
   const balances = balancesFrom(data).filter((b) => b.studentId === studentId);
   return { payments, balances };
@@ -254,7 +273,7 @@ export async function getPaymentSummary(user: SessionUser, range: DateRange) {
       return {
         ...p,
         studentName: student?.name ?? student?.email ?? "Unknown student",
-        courseTitle: data.courses.get(p.courseId)?.title ?? "Deleted course",
+        courseTitle: paymentTitle(data, p),
       };
     });
   return {

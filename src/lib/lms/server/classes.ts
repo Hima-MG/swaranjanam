@@ -34,6 +34,8 @@ export function mapLiveClass(snapshot: DocumentSnapshot<DocumentData>): LiveClas
   return {
     id: snapshot.id,
     studentId: String(d.studentId ?? ""),
+    packageId: isValidId(d.packageId) ? d.packageId : null,
+    sessionKey: isValidId(d.sessionKey) ? d.sessionKey : isValidId(d.packageId) ? snapshot.id : null,
     title: String(d.title ?? "Class"),
     startAt,
     endAt,
@@ -189,4 +191,39 @@ export async function listOwnClasses(user: SessionUser): Promise<{ classes: Stud
       return aPast ? b.startAt.localeCompare(a.startAt) : a.startAt.localeCompare(b.startAt);
     });
   return { classes, nowMs };
+}
+
+/** Every class of one student, newest first (teacher's student profile: class history and attendance). */
+export async function listClassesForStudent(user: SessionUser, studentId: string): Promise<LiveClassRecord[]> {
+  if (user.role !== "teacher") throw new Error("Teacher role required");
+  if (!isValidId(studentId)) return [];
+  const snapshot = await col("liveClasses").where("studentId", "==", studentId).get();
+  return snapshot.docs
+    .map(mapLiveClass)
+    .filter((c): c is LiveClassRecord => c !== null)
+    .sort((a, b) => b.startAt.localeCompare(a.startAt));
+}
+
+/** Registered students as select options (teacher forms). */
+export async function listStudentOptions(user: SessionUser) {
+  if (user.role !== "teacher") throw new Error("Teacher role required");
+  return (await studentDirectory()).map((s) => ({
+    uid: s.uid,
+    label: s.name ? `${s.name}${s.email ? ` (${s.email})` : ""}` : (s.email ?? s.uid),
+  }));
+}
+
+/**
+ * The signed-in student's full class history (past classes), newest first.
+ * Bound to user.uid; returns student views only (no private notes).
+ */
+export async function listOwnClassHistory(user: SessionUser): Promise<StudentClassView[]> {
+  if (user.role !== "student") return [];
+  const nowMs = Date.now();
+  const snapshot = await col("liveClasses").where("studentId", "==", user.uid).get();
+  return snapshot.docs
+    .map(mapLiveClass)
+    .filter((c): c is LiveClassRecord => c !== null && c.studentId === user.uid && (Date.parse(c.endAt) < nowMs || c.status !== "scheduled"))
+    .sort((a, b) => b.startAt.localeCompare(a.startAt))
+    .map((c) => toStudentView(c, "Swaraanjanam Academy", nowMs));
 }

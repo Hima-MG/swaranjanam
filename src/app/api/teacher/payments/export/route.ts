@@ -1,9 +1,14 @@
 import { authorizeRequest } from "@/lib/auth/session";
 import { csvResponse, toCsv } from "@/lib/csv";
+import { PAYMENT_REPORT_HEADERS, paymentReportRow } from "@/lib/lms/billing";
 import { listPayments, parsePaymentFilters } from "@/lib/lms/server/payments";
 import { PAYMENT_METHOD_LABELS } from "@/lib/lms/types";
 
-/** Teacher-only CSV export of payment records, honouring the page filters. */
+/**
+ * Teacher-only CSV export of payment records, honouring the page filters.
+ * References are masked and teacher notes, student emails and staff emails are
+ * left out; the full details stay in the dashboard.
+ */
 export async function GET(request: Request) {
   const { user, response } = await authorizeRequest("teacher");
   if (response) return response;
@@ -12,25 +17,8 @@ export async function GET(request: Request) {
   const result = await listPayments(user, { ...parsePaymentFilters(params), page: 1 });
 
   const csv = toCsv(
-    ["Payment date", "Student", "Student email", "Course", "Amount", "Currency", "Method", "Reference", "Status", "Verified", "Source", "Notes", "Recorded by", "Recorded at", "Last updated by", "Last updated at"],
-    result.allRows.map((p) => [
-      p.paidAt?.slice(0, 10),
-      p.studentName,
-      p.studentEmail,
-      p.courseTitle,
-      (p.amountMinor / 100).toFixed(2),
-      p.currency,
-      PAYMENT_METHOD_LABELS[p.method],
-      p.reference,
-      p.status,
-      p.verified ? "yes" : "no",
-      p.source,
-      p.notes,
-      p.createdByEmail,
-      p.createdAt,
-      p.updatedByEmail,
-      p.updatedAt,
-    ]),
+    PAYMENT_REPORT_HEADERS,
+    result.allRows.map((p) => paymentReportRow({ ...p, methodLabel: PAYMENT_METHOD_LABELS[p.method] ?? "Other" })),
   );
   return csvResponse(`swaraanjanam-payments-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 }

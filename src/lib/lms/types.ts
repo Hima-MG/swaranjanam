@@ -13,6 +13,17 @@ import type { CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/typ
 //   submissions/{autoId}                 — student practice recordings + teacher feedback
 //   reviews/{courseId}_{studentId}       — one course review per student, moderated
 //   auditLogs/{autoId}                   — who did what, for sensitive teacher actions
+//   liveClasses/{autoId}                 — Google Meet classes (lib/lms/classes.ts)
+//
+// Billing (lib/lms/billing.ts — rules; lib/lms/server/billing.ts — data):
+//   pricePlans/{planId}                  — configurable fees (published plans use slugs as ids)
+//   packages/pkg_{requestKey}            — a purchased package; idempotent id, fixed price snapshot
+//   creditLedger/{packageId}_{sessionKey} — one class-credit consumption per package session
+//   billingAdjustments/{autoId}          — approved refunds, fee waivers and credit changes
+//   receipts/{paymentId}                 — one receipt per verified payment, fixed snapshot
+//   paymentReferences/{hash}             — reservation that makes payment references unique
+//   settings/billing                     — accepted payment methods
+//   settings/receiptCounter              — receipt number sequence (transaction-guarded)
 //
 // Timestamps are Firestore Timestamps in the database and ISO strings once
 // they leave the data layer, so records can be passed to Client Components.
@@ -171,6 +182,17 @@ export const DEFAULT_CURRENCY = "INR";
 // verified by the teacher who records them (offline payments they have
 // confirmed). Gateway records (e.g. Razorpay, future) must only ever be marked
 // verified by server-side signature/webhook verification — never by the client.
+//
+// A payment belongs to EITHER a legacy enrollment fee (enrollmentId set,
+// packageId null) OR a package (packageId set, enrollmentId ""). It counts
+// towards that one balance only, never both.
+//
+// Future gateway integration (not implemented): the server creates the order,
+// stores it in `gateway` ({ provider, orderId, paymentId }), verifies the
+// signature/webhook on the server, processes each webhook event idempotently
+// (keyed by the provider's event id) and only then moves the record to
+// paid + verified through the same receipt and package-activation code used
+// for manual verification. A browser redirect is never proof of payment.
 
 export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
@@ -198,9 +220,22 @@ export const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
 
 export interface PaymentRecord {
   id: string;
+  /** Legacy payments: the student. Package payments: the first learner. */
   studentId: string;
   courseId: string;
+  /** Legacy enrollment-fee payments only; "" for package payments. */
   enrollmentId: string;
+  /** Package payments only. */
+  packageId: string | null;
+  /** Everyone who may see this payment (package learners, or the student). */
+  learnerIds: string[];
+  /** Who paid, when not the learner (e.g. a parent). */
+  payerName: string | null;
+  /** Required when a payment is rejected (status "failed"). */
+  rejectionReason: string | null;
+  verifiedAt: string | null;
+  verifiedByEmail: string | null;
+  receiptId: string | null;
   /** Amount in the smallest currency unit (paise for INR). */
   amountMinor: number;
   currency: string;
@@ -308,7 +343,18 @@ export interface AuditEntry {
   action: string;
   actorId: string;
   actorEmail: string | null;
-  targetType: "course" | "enrollment" | "student" | "payment" | "review" | "submission" | "announcement" | "settings";
+  targetType:
+    | "course"
+    | "enrollment"
+    | "student"
+    | "payment"
+    | "review"
+    | "submission"
+    | "announcement"
+    | "settings"
+    | "package"
+    | "pricePlan"
+    | "receipt";
   targetId: string;
   summary: string;
   at: string | null;

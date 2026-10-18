@@ -1,9 +1,10 @@
-import { BookOpen, Mail, Phone, PlayCircle, UserRound } from "lucide-react";
+import { BookOpen, Mail, Package, Phone, PlayCircle, UserRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
 import { LogoutButton } from "@/components/auth/logout-button";
+import { CreditsMeter, nextPaymentText, PackageStatusBadge } from "@/components/lms/billing-display";
 import { LmsThumbnail } from "@/components/lms/lms-thumbnail";
 import { ProgressBar } from "@/components/lms/progress-bar";
 import { PageHero } from "@/components/shared/page-hero";
@@ -14,6 +15,7 @@ import { getUserProfile } from "@/lib/auth/profile";
 import { requireRole } from "@/lib/auth/session";
 import { getStudentOverview } from "@/lib/lms/server/student";
 import { listAnnouncementsForStudent } from "@/lib/lms/server/announcements";
+import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses } from "@/lib/lms/server/classes";
 import { UpcomingClasses } from "@/components/lms/student/upcoming-classes";
 import { formatDate } from "@/lib/format-date";
@@ -23,13 +25,15 @@ export const metadata: Metadata = { title: "My Dashboard" };
 async function StudentDashboard() {
   // Server-side guard: signed-out visitors go to /login, teachers to /teacher.
   const user = await requireRole("student", "/dashboard");
-  const [profile, overview, announcements, liveClasses] = await Promise.all([
+  const [profile, overview, announcements, liveClasses, billing] = await Promise.all([
     getUserProfile(user.uid),
     getStudentOverview(user),
     listAnnouncementsForStudent(user),
     // Bound to the signed-in student's uid inside the data layer.
     listOwnClasses(user),
+    getOwnBilling(user),
   ]);
+  const currentPackages = billing.packages.filter((p) => p.status !== "cancelled" && p.status !== "credits_used").slice(0, 2);
   const name = profile?.displayName ?? user.name ?? "Student";
 
   const details = [
@@ -172,23 +176,55 @@ async function StudentDashboard() {
         </section>
       </div>
 
-      <aside className="flex flex-col gap-5 self-start rounded-2xl border border-border bg-card p-7 shadow-soft">
-        <h2 className="type-h3">My profile</h2>
-        <ul className="flex flex-col gap-4 text-sm">
-          {details.map(({ icon: Icon, label, value }) => (
-            <li key={label} className="flex items-center gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-maroon-soft text-maroon">
-                <Icon className="size-4" aria-hidden="true" />
-              </span>
-              <span className="flex min-w-0 flex-col">
-                <span className="text-xs text-muted-foreground">{label}</span>
-                <span className="font-medium break-all text-brown">{value}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <LogoutButton variant="outline" className="self-start" />
-      </aside>
+      <div className="flex flex-col gap-6 self-start">
+        <section aria-labelledby="my-packages" className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-7 shadow-soft">
+          <h2 id="my-packages" className="type-h3">My packages</h2>
+          {currentPackages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {billing.packages.length === 0 ? "No class package yet. Your teacher will set one up when you enrol." : "No current package. Your next package is due before your next class."}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-4">
+              {currentPackages.map((p) => {
+                const next = nextPaymentText(p.next, p.currency);
+                return (
+                  <li key={p.id} className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-brown">{p.title}</span>
+                      <PackageStatusBadge status={p.status} />
+                    </div>
+                    <CreditsMeter used={p.summary.creditsUsed} total={p.summary.creditsTotal} label={`${p.title} classes used`} />
+                    {next && <p className="text-xs text-muted-foreground">{next}</p>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <Button asChild variant="outline" size="sm" className="self-start">
+            <Link href="/dashboard/billing">
+              <Package data-icon="inline-start" />
+              Packages, payments & receipts
+            </Link>
+          </Button>
+        </section>
+        <aside className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-7 shadow-soft">
+          <h2 className="type-h3">My profile</h2>
+          <ul className="flex flex-col gap-4 text-sm">
+            {details.map(({ icon: Icon, label, value }) => (
+              <li key={label} className="flex items-center gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-maroon-soft text-maroon">
+                  <Icon className="size-4" aria-hidden="true" />
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                  <span className="font-medium break-all text-brown">{value}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <LogoutButton variant="outline" className="self-start" />
+        </aside>
+      </div>
     </div>
   );
 }

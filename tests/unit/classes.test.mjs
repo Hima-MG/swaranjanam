@@ -173,10 +173,24 @@ describe("toStudentView", () => {
 
   test("never includes teacher-only or identifying fields", () => {
     const view = toStudentView(record, "Swaraanjanam", during);
-    for (const key of ["attendance", "outcomeNote", "outcomeRecordedAt", "studentId", "createdBy", "createdByEmail", "updatedBy", "updatedByEmail"]) {
+    for (const key of ["outcomeNote", "outcomeRecordedAt", "studentId", "packageId", "createdBy", "createdByEmail", "updatedBy", "updatedByEmail"]) {
       assert.equal(key in view, false, `${key} must not be present`);
     }
     assert.equal(JSON.stringify(view).includes("PRIVATE TEACHER NOTE"), false);
+  });
+  // Policy (billing phase): students see their OWN attendance once the class is
+  // completed; the teacher's private outcome note is never sent.
+  test("attendance is shown to the student only for a completed class", () => {
+    assert.equal(toStudentView(record, "T", during).attendance, null);
+    const done = toStudentView({ ...record, status: "completed" }, "T", after);
+    assert.equal(done.attendance, "absent");
+    assert.equal(JSON.stringify(done).includes("PRIVATE TEACHER NOTE"), false);
+    assert.equal(toStudentView({ ...record, status: "completed", attendance: "unknown" }, "T", after).attendance, null);
+  });
+  test("classes without a package keep working (packageId missing or null)", () => {
+    assert.equal(toStudentView(record, "T", during).packageLinked, false);
+    assert.equal(toStudentView({ ...record, packageId: null }, "T", during).packageLinked, false);
+    assert.equal(toStudentView({ ...record, packageId: "pkg_x" }, "T", during).packageLinked, true);
   });
   test("Meet link only inside the joining window", () => {
     assert.equal(toStudentView(record, "T", during).meetUrl, record.meetUrl);

@@ -134,7 +134,13 @@ export function UpcomingClasses({ classes, serverNow }: { classes: StudentClassV
               <p className="text-xs text-muted-foreground">With {c.teacherName} · Google Meet</p>
               {c.notes && <p className="text-sm whitespace-pre-line text-muted-foreground">{c.notes}</p>}
               {phase === "cancelled" && (
-                <p className="text-sm text-destructive">This class was cancelled{c.cancelReason ? `: ${c.cancelReason}` : "."}</p>
+                <p className="text-sm text-destructive">
+                  This class was cancelled{c.cancelReason ? `: ${c.cancelReason}` : "."}
+                  {c.packageLinked ? " It does not use a class from your package." : ""}
+                </p>
+              )}
+              {c.attendance && (
+                <p className="text-xs text-muted-foreground">{c.attendance === "attended" ? "You attended this class." : "Marked absent (counted as a class)."}</p>
               )}
             </div>
             <div className="shrink-0">

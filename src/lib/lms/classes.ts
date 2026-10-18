@@ -33,6 +33,14 @@ export const MAX_CLASS_MINUTES = 4 * 60;
 export interface LiveClassRecord {
   id: string;
   studentId: string;
+  /** Package whose credits this class uses; null for classes not linked to a package. */
+  packageId: string | null;
+  /**
+   * Shared by the class records of one session. A pair session has one record
+   * per learner (separate attendance and history) with the same key, and uses
+   * one package credit. Single classes: the class id.
+   */
+  sessionKey: string | null;
   title: string;
   /** ISO instants (UTC) of the scheduled start/end. */
   startAt: string;
@@ -75,6 +83,10 @@ export interface StudentClassView {
    */
   meetUrl: string | null;
   teacherName: string;
+  /** The student's own attendance once the teacher has recorded it (never the private note). */
+  attendance: "attended" | "absent" | null;
+  /** Uses a credit from one of the student's packages. */
+  packageLinked: boolean;
 }
 
 export function toStudentView(record: LiveClassRecord, teacherName: string, now: number): StudentClassView {
@@ -89,6 +101,9 @@ export function toStudentView(record: LiveClassRecord, teacherName: string, now:
     cancelReason: record.status === "cancelled" ? record.cancelReason : null,
     meetUrl: joinable ? record.meetUrl : null,
     teacherName,
+    attendance:
+      record.status === "completed" && (record.attendance === "attended" || record.attendance === "absent") ? record.attendance : null,
+    packageLinked: Boolean(record.packageId),
   };
 }
 
