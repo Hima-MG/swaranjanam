@@ -13,6 +13,7 @@ import type { CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/typ
 //   submissions/{autoId}                 — student practice recordings + teacher feedback
 //   reviews/{courseId}_{studentId}       — one course review per student, moderated
 //   auditLogs/{autoId}                   — who did what, for sensitive teacher actions
+//   testimonials/{autoId}                — student testimonials; public only when approved + consented (lib/lms/testimonials.ts)
 //   liveClasses/{autoId}                 — Google Meet classes (lib/lms/classes.ts)
 //
 // Billing (lib/lms/billing.ts — rules; lib/lms/server/billing.ts — data):
@@ -354,7 +355,8 @@ export interface AuditEntry {
     | "settings"
     | "package"
     | "pricePlan"
-    | "receipt";
+    | "receipt"
+    | "testimonial";
   targetId: string;
   summary: string;
   at: string | null;

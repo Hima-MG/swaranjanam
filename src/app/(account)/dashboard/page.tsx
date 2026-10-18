@@ -17,7 +17,9 @@ import { getStudentOverview } from "@/lib/lms/server/student";
 import { listAnnouncementsForStudent } from "@/lib/lms/server/announcements";
 import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses } from "@/lib/lms/server/classes";
+import { TestimonialPanel } from "@/components/lms/student/testimonial-panel";
 import { UpcomingClasses } from "@/components/lms/student/upcoming-classes";
+import { getOwnTestimonials } from "@/lib/lms/server/testimonials";
 import { formatDate } from "@/lib/format-date";
 
 export const metadata: Metadata = { title: "My Dashboard" };
@@ -25,13 +27,15 @@ export const metadata: Metadata = { title: "My Dashboard" };
 async function StudentDashboard() {
   // Server-side guard: signed-out visitors go to /login, teachers to /teacher.
   const user = await requireRole("student", "/dashboard");
-  const [profile, overview, announcements, liveClasses, billing] = await Promise.all([
+  const [profile, overview, announcements, liveClasses, billing, ownTestimonials] = await Promise.all([
     getUserProfile(user.uid),
     getStudentOverview(user),
     listAnnouncementsForStudent(user),
     // Bound to the signed-in student's uid inside the data layer.
     listOwnClasses(user),
     getOwnBilling(user),
+    // Own submissions only (bound to user.uid in the data layer).
+    getOwnTestimonials(user),
   ]);
   const currentPackages = billing.packages.filter((p) => p.status !== "cancelled" && p.status !== "credits_used").slice(0, 2);
   const name = profile?.displayName ?? user.name ?? "Student";
@@ -173,6 +177,18 @@ async function StudentDashboard() {
               temporarily unavailable while your teacher updates them.
             </p>
           )}
+        </section>
+
+        <section aria-labelledby="share-experience" className="flex flex-col gap-3">
+          <div>
+            <h2 id="share-experience" className="type-h3">
+              Share your experience
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Tell other learners what studying at Swaraanjanam is like. With your permission, the academy may publish it on the website.
+            </p>
+          </div>
+          <TestimonialPanel accountName={profile?.displayName ?? user.name} courses={ownTestimonials.courses} testimonials={ownTestimonials.testimonials} />
         </section>
       </div>
 

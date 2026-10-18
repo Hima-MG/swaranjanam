@@ -10,13 +10,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-// Marketing copy for public pages. Figures and testimonials are placeholders
-// and should be replaced with verified academy data before launch.
-
-export interface Stat {
-  value: string;
-  label: string;
-}
+// Marketing copy for public pages. Do not add statistics, ratings, student
+// counts or testimonials here: student testimonials come only from approved,
+// consented submissions (lib/lms/server/testimonials.ts).
 
 export interface Feature {
   icon: LucideIcon;
@@ -29,18 +25,6 @@ export interface JourneyStep {
   title: string;
   description: string;
 }
-
-export interface Testimonial {
-  quote: string;
-  name: string;
-  role: string;
-}
-
-export const stats: Stat[] = [
-  { value: "500+", label: "Students taught" },
-  { value: "15+", label: "Years of teaching" },
-  { value: "4.9", label: "Average rating" },
-];
 
 export const features: Feature[] = [
   {
@@ -101,27 +85,6 @@ export const journey: JourneyStep[] = [
     step: "04",
     title: "Performance",
     description: "Manodharma, improvisation and concert preparation.",
-  },
-];
-
-export const testimonials: Testimonial[] = [
-  {
-    quote:
-      "The classes are patient and well structured. My daughter now practises every day without being reminded.",
-    name: "Lakshmi R.",
-    role: "Parent, Vocal for Children",
-  },
-  {
-    quote:
-      "I started as a complete beginner in my thirties. The step-by-step approach made Carnatic music feel achievable.",
-    name: "Arjun K.",
-    role: "Student, Basics for Beginners",
-  },
-  {
-    quote:
-      "Recorded lessons alongside live correction is the perfect balance for someone with a busy schedule.",
-    name: "Meera S.",
-    role: "Student, Intermediate",
   },
 ];
 

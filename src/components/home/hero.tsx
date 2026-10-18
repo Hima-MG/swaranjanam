@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDays, Star } from "lucide-react";
+import { ArrowRight, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
 import { Mandala } from "@/components/decor/mandala";
@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
 import { siteConfig } from "@/config/site";
-import { stats } from "@/data/content";
 
 const swaras = ["Sa", "Ri", "Ga", "Ma", "Pa", "Da", "Ni"];
 
@@ -39,15 +38,6 @@ function HeroArt() {
         <div className="leading-tight">
           <p className="text-xs text-muted-foreground">New batches</p>
           <p className="text-sm font-semibold text-brown">Every month</p>
-        </div>
-      </div>
-      <div className="absolute -right-3 bottom-36 flex items-center gap-3 rounded-2xl border border-border bg-ivory/95 p-3 pr-5 shadow-card backdrop-blur sm:-right-4">
-        <span className="flex size-10 items-center justify-center rounded-xl bg-maroon text-gold-light">
-          <Star className="size-5 fill-current" aria-hidden="true" />
-        </span>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold text-brown">4.9 / 5 rating</p>
-          <p className="text-xs text-muted-foreground">from 500+ students</p>
         </div>
       </div>
     </div>
@@ -85,14 +75,6 @@ export function Hero() {
               <Link href="/contact">Book a Free Trial</Link>
             </Button>
           </div>
-          <ul className="mt-2 grid w-full max-w-lg grid-cols-3 divide-x divide-border border-t border-border pt-6">
-            {stats.slice(0, 3).map((stat) => (
-              <li key={stat.label} className="flex flex-col px-4 first:pl-0">
-                <span className="font-heading text-3xl font-semibold text-maroon">{stat.value}</span>
-                <span className="text-xs text-muted-foreground">{stat.label}</span>
-              </li>
-            ))}
-          </ul>
         </div>
         <HeroArt />
       </Container>

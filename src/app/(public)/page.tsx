@@ -14,6 +14,7 @@ import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
 import { features } from "@/data/content";
 import { featuredCourses, getPublishedCourses } from "@/lib/catalog/server";
+import { getPublicTestimonials } from "@/lib/lms/server/testimonials";
 import { CatalogEmpty, CatalogError } from "@/components/course/catalog-states";
 import { CourseGridSkeleton } from "@/components/ui/loading-state";
 
@@ -23,6 +24,11 @@ async function FeaturedCourses() {
   if (!result.ok) return <CatalogError />;
   if (result.data.length === 0) return <CatalogEmpty />;
   return <CourseGrid courses={featuredCourses(result.data, 4)} columns={4} />;
+}
+
+/** Approved, consented student testimonials only (cached; refreshed on moderation). */
+async function StudentStories() {
+  return <Testimonials testimonials={await getPublicTestimonials()} />;
 }
 
 export default function HomePage() {
@@ -64,7 +70,9 @@ export default function HomePage() {
       </Section>
 
       <LearningPath />
-      <Testimonials />
+      <Suspense fallback={null}>
+        <StudentStories />
+      </Suspense>
       <CtaBanner />
     </>
   );

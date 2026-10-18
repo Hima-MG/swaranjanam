@@ -15,6 +15,8 @@ rules_version = '2';
 //   announcements/{autoId}               server only; students see theirs via the app
 //   liveClasses/{autoId}                 server only; students see their own via the app
 //   auditLogs/{autoId}                   teacher-only (server); no client access
+//   testimonials/{autoId}                server only; public site shows approved + consented
+//                                        ones through the app. Covered by the catch-all deny.
 //   pricePlans, packages, creditLedger,  billing (server only): no client access.
 //   billingAdjustments, receipts,        Students see their own packages, payments
 //   paymentReferences, settings          and receipts only through the app, which

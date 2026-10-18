@@ -43,6 +43,7 @@ export const COLLECTIONS = {
   announcements: "announcements",
   liveClasses: "liveClasses",
   auditLogs: "auditLogs",
+  testimonials: "testimonials",
   // Billing (see lib/lms/billing.ts and lib/lms/server/billing.ts).
   pricePlans: "pricePlans",
   packages: "packages",
