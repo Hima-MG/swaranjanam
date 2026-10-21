@@ -71,7 +71,7 @@ export function CourseCard({ course, className }: CourseCardProps) {
         </div>
 
         <div className="mt-auto flex items-end justify-between gap-3 border-t border-border pt-4">
-          <CoursePrice price={course.price} originalPrice={course.originalPrice} />
+          <CoursePrice fee={course.fee} />
           <span
             aria-hidden="true"
             className="flex size-10 items-center justify-center rounded-full bg-maroon-soft text-maroon transition-colors group-hover:bg-maroon group-hover:text-cream"

@@ -150,10 +150,10 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
         </div>
 
         <div className="grid gap-5 sm:grid-cols-3 sm:items-start">
-          <Field id="catalog-price" label="Fee (₹)" hint="Whole rupees. Leave empty to show “Fees on request”." error={e.price}>
+          <Field id="catalog-price" label="Fee (₹)" hint="Whole rupees. Used only as the agreed fee for direct course enrollments. The public website shows fees from Fees & pricing (the plan linked to this course)." error={e.price}>
             <Input id="catalog-price" name="price" inputMode="numeric" defaultValue={course.price ?? ""} aria-invalid={e.price ? true : undefined} />
           </Field>
-          <Field id="catalog-originalPrice" label="Original fee (₹)" hint="Optional; shown struck through." error={e.originalPrice}>
+          <Field id="catalog-originalPrice" label="Original fee (₹)" hint="Optional. No longer shown on the public website." error={e.originalPrice}>
             <Input
               id="catalog-originalPrice"
               name="originalPrice"

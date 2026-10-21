@@ -102,7 +102,7 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
           <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card lg:sticky lg:top-24">
             <CourseThumbnail course={course} priority sizes="(min-width: 1024px) 380px, 100vw" />
             <div className="flex flex-col gap-5 p-6">
-              <CoursePrice price={course.price} originalPrice={course.originalPrice} size="lg" showDiscount />
+              <CoursePrice fee={course.fee} size="lg" detailed />
               <div className="flex flex-col gap-3">
                 <EnrollButton courseTitle={course.title} />
                 <Button asChild size="lg" variant="outline" className="w-full">

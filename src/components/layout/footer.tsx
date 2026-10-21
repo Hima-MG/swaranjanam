@@ -1,4 +1,4 @@
-import { Mail, MapPin, Phone } from "lucide-react";
+import { Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
 import { cacheLife } from "next/cache";
 import Link from "next/link";
 import { Fragment, Suspense } from "react";
@@ -24,7 +24,9 @@ const contactItems = [
   { icon: InstagramIcon, label: `Instagram ${social.instagram.handle}`, href: social.instagram.url },
   ...(social.youtubeUrl ? [{ icon: YouTubeIcon, label: "YouTube channel", href: social.youtubeUrl }] : []),
   { icon: Phone, label: siteConfig.contact.phone, href: `tel:${siteConfig.contact.phone.replace(/\s/g, "")}` },
+  { icon: MessageCircle, label: `WhatsApp ${siteConfig.contact.whatsapp}`, href: siteConfig.contact.whatsappUrl },
   { icon: MapPin, label: siteConfig.contact.address },
+  { icon: Clock, label: siteConfig.contact.hours },
 ];
 
 const ALL_COURSES: NavItem = { label: "All courses", href: "/courses" };

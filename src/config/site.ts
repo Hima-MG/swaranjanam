@@ -23,9 +23,9 @@ export function resolveSiteUrl(
   return "http://localhost:3000";
 }
 
-// Site-wide configuration. Email and Instagram are the academy's supplied
-// details; phone, WhatsApp, address and hours are still placeholders —
-// replace them with real details before launch.
+// Site-wide configuration. Contact details are the academy's confirmed details.
+const WHATSAPP_NUMBER = "+91 85475 45175";
+
 export const siteConfig = {
   name: "Swaraanjanam",
   fullName: "Swaraanjanam Carnatic Music Academy",
@@ -35,10 +35,12 @@ export const siteConfig = {
   url: resolveSiteUrl(),
   contact: {
     email: "swaraanjanammusicacademy@gmail.com",
-    phone: "+91 00000 00000",
-    whatsapp: "+91 00000 00000",
-    address: "Hyderabad, Telangana, India",
-    hours: "Mon – Sat, 7:00 AM – 8:00 PM IST",
+    phone: "+91 85475 45175",
+    whatsapp: WHATSAPP_NUMBER,
+    /** Official click-to-chat link: digits only, country code first (918547545175). */
+    whatsappUrl: `https://wa.me/${WHATSAPP_NUMBER.replace(/\D/g, "")}`,
+    address: "Palakkad, Kerala, India",
+    hours: "Monday – Saturday, 9:00 AM – 6:00 PM IST",
   },
   social: {
     instagram: { handle: "@swaraanjanam", url: "https://www.instagram.com/swaraanjanam/" },

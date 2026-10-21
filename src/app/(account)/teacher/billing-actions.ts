@@ -1,8 +1,9 @@
 "use server";
 
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { refresh } from "next/cache";
+import { refresh, updateTag } from "next/cache";
 
+import { CATALOG_TAG } from "@/lib/catalog/server";
 import {
   ADJUSTMENT_KINDS,
   buildPackageDraft,
@@ -72,6 +73,8 @@ export async function installPublishedPlans(): Promise<ActionResult<{ created: s
         targetId: "published",
         summary: `Set up fee plans: ${created.join(", ")}`,
       });
+      // Public course pages show fees from these plans.
+      updateTag(CATALOG_TAG);
     }
     refresh();
     return { created };
@@ -141,6 +144,8 @@ export async function updatePricePlan(planId: unknown, input: Record<string, unk
     });
     if (changes.length) {
       await writeAudit(user, { action: "pricing.update", targetType: "pricePlan", targetId: planId, summary: `${current.title}: ${changes.join("; ")}` });
+      // Public course pages show fees from these plans.
+      updateTag(CATALOG_TAG);
       refresh();
     }
     return null;

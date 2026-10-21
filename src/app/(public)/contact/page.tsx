@@ -1,13 +1,12 @@
-import { Clock, Mail, MapPin, MessageCircle } from "lucide-react";
+import { Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
+import { EnquiryForm } from "@/components/forms/enquiry-form";
 import { FormField } from "@/components/forms/form-field";
-import { PlaceholderForm } from "@/components/forms/placeholder-form";
 import { PageHero } from "@/components/shared/page-hero";
 import { InstagramIcon, YouTubeIcon } from "@/components/shared/social-icons";
 import { Section } from "@/components/ui/section";
-import { Textarea } from "@/components/ui/textarea";
 import { siteConfig } from "@/config/site";
 import { getPublishedCourses } from "@/lib/catalog/server";
 
@@ -22,7 +21,8 @@ const contactDetails = [
   { icon: Mail, label: "Email", value: contact.email, href: `mailto:${contact.email}` },
   { icon: InstagramIcon, label: "Instagram", value: social.instagram.handle, href: social.instagram.url },
   ...(social.youtubeUrl ? [{ icon: YouTubeIcon, label: "YouTube", value: "Our channel", href: social.youtubeUrl }] : []),
-  { icon: MessageCircle, label: "Phone / WhatsApp", value: contact.whatsapp, href: `tel:${contact.whatsapp.replace(/\s/g, "")}` },
+  { icon: Phone, label: "Phone", value: contact.phone, href: `tel:${contact.phone.replace(/\s/g, "")}` },
+  { icon: MessageCircle, label: "WhatsApp", value: contact.whatsapp, href: contact.whatsappUrl },
   { icon: MapPin, label: "Location", value: contact.address },
   { icon: Clock, label: "Hours", value: contact.hours },
 ];
@@ -91,27 +91,15 @@ export default function ContactPage() {
 
           <div className="rounded-3xl border border-border bg-card p-7 shadow-card sm:p-10">
             <h2 className="type-h3 mb-6">Send us a message</h2>
-            <PlaceholderForm
-              submitLabel="Send Message"
-              notice="Thank you! Online enquiries will be enabled soon — please reach us by email or WhatsApp for now."
-            >
-              <div className="grid gap-5 sm:grid-cols-2">
-                <FormField id="name" label="Full name" autoComplete="name" required />
-                <FormField id="email" label="Email address" type="email" autoComplete="email" required />
-                <FormField id="phone" label="Phone / WhatsApp" type="tel" autoComplete="tel" />
+            <EnquiryForm
+              whatsappUrl={contact.whatsappUrl}
+              email={contact.email}
+              courseSelect={
                 <Suspense fallback={<CourseSelect courses={[]} />}>
                   <PublishedCourseSelect />
                 </Suspense>
-              </div>
-              <FormField id="message" label="Message">
-                <Textarea
-                  id="message"
-                  name="message"
-                  rows={5}
-                  placeholder="Tell us about your musical background and goals"
-                />
-              </FormField>
-            </PlaceholderForm>
+              }
+            />
           </div>
         </div>
       </Section>

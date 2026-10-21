@@ -2,6 +2,9 @@ import "server-only";
 
 import { cacheLife, cacheTag } from "next/cache";
 
+import { planForCourse, publicFeeFromPlan } from "@/lib/catalog/public-fees";
+import type { PricePlan } from "@/lib/lms/billing";
+import { listPlans } from "@/lib/lms/server/billing";
 import { col, mapCourse, readLessons, readModules } from "@/lib/lms/server/db";
 import type { CourseRecord } from "@/lib/lms/types";
 import type { Course, CourseCategory, CourseDetail, CourseTone } from "@/types/course";
@@ -11,6 +14,9 @@ import type { Course, CourseCategory, CourseDetail, CourseTone } from "@/types/c
 // * Only `status == "published"` courses are ever returned.
 // * Only catalogue fields and module/lesson TITLES leave this module — never
 //   lesson resources, teacher ids or enrollment data.
+// * Fees come only from the published fee plan linked to the course
+//   (pricePlans.courseId), never from the legacy course.price field. Fee-plan
+//   edits also call updateTag(CATALOG_TAG).
 // * Results are cached ("use cache") under CATALOG_TAG. Every teacher
 //   mutation that can change public content calls updateTag(CATALOG_TAG), so
 //   edits, publishing and unpublishing show up immediately.
@@ -28,7 +34,7 @@ function toneFor(id: string): CourseTone {
   return TONES[hash % TONES.length];
 }
 
-function toPublicCourse(course: CourseRecord, moduleCount: number, lessonCount: number): Course {
+function toPublicCourse(course: CourseRecord, moduleCount: number, lessonCount: number, plans: readonly PricePlan[]): Course {
   return {
     id: course.id,
     slug: course.slug,
@@ -45,8 +51,7 @@ function toPublicCourse(course: CourseRecord, moduleCount: number, lessonCount: 
     duration: course.duration,
     ageGroup: course.ageGroup,
     instructor: course.instructor,
-    price: course.price,
-    originalPrice: course.originalPrice,
+    fee: publicFeeFromPlan(planForCourse(plans, course.id)),
     tag: course.tag,
     featured: course.featured,
     outcomes: course.outcomes,
@@ -62,7 +67,7 @@ function logFailure(label: string, error: unknown) {
 }
 
 async function readPublishedCourses(): Promise<Course[]> {
-  const snapshot = await col("courses").where("status", "==", "published").get();
+  const [snapshot, plans] = await Promise.all([col("courses").where("status", "==", "published").get(), listPlans()]);
   const courses = snapshot.docs.map(mapCourse).filter((c): c is CourseRecord => c !== null);
   const withCounts = await Promise.all(
     courses.map(async (course) => {
@@ -70,7 +75,7 @@ async function readPublishedCourses(): Promise<Course[]> {
         col("modules").where("courseId", "==", course.id).count().get(),
         col("lessons").where("courseId", "==", course.id).count().get(),
       ]);
-      return toPublicCourse(course, modules.data().count, lessons.data().count);
+      return toPublicCourse(course, modules.data().count, lessons.data().count, plans);
     }),
   );
   // Featured first, then alphabetical: a stable order teachers can influence.
@@ -113,7 +118,7 @@ export async function getPublishedCourseBySlug(slug: string): Promise<CatalogRes
       cacheLife("hours");
       return { ok: true, data: null };
     }
-    const [modules, lessons] = await Promise.all([readModules(course.id), readLessons(course.id)]);
+    const [modules, lessons, plans] = await Promise.all([readModules(course.id), readLessons(course.id), listPlans()]);
     const curriculum = modules.map((module) => ({
       title: module.title,
       titleMl: module.titleMl,
@@ -122,7 +127,7 @@ export async function getPublishedCourseBySlug(slug: string): Promise<CatalogRes
         .map((lesson) => ({ title: lesson.title, titleMl: lesson.titleMl })),
     }));
     cacheLife("hours");
-    return { ok: true, data: { ...toPublicCourse(course, modules.length, lessons.length), curriculum } };
+    return { ok: true, data: { ...toPublicCourse(course, modules.length, lessons.length, plans), curriculum } };
   } catch (error) {
     logFailure("getPublishedCourseBySlug", error);
     cacheLife("seconds");

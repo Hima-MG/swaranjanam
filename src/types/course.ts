@@ -1,3 +1,5 @@
+import type { PublicFee } from "@/lib/catalog/public-fees";
+
 // Course taxonomy (the option lists teachers choose from) and the public
 // catalogue view of a course. Course records themselves live in Firestore and
 // are managed in the teacher dashboard; nothing here describes a real course.
@@ -35,9 +37,12 @@ export interface Course {
   duration: string;
   ageGroup: string;
   instructor: string;
-  /** Price in INR (whole rupees); null when fees are not listed. */
-  price: number | null;
-  originalPrice: number | null;
+  /**
+   * Fees from the linked published fee plan (Fees & pricing); null when no
+   * plan is linked or it is inactive ("Fees on request"). The legacy
+   * course.price field is deliberately not part of the public course.
+   */
+  fee: PublicFee | null;
   tag: CourseTag | null;
   featured: boolean;
   outcomes: string[];
