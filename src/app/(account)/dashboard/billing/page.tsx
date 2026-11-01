@@ -14,7 +14,7 @@ import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
-import { ADVANCE_STATUS_LABELS, BILLING_MODE_LABELS, CLASS_OUTCOME_LABELS, periodLabel, SESSION_CHARGE_LABELS } from "@/lib/lms/class-billing";
+import { ADVANCE_STATUS_LABELS, BATCH_BLOCK_MESSAGES, BILLING_MODE_LABELS, CLASS_OUTCOME_LABELS, SESSION_CHARGE_LABELS } from "@/lib/lms/class-billing";
 import { getOwnClassBilling } from "@/lib/lms/server/class-billing";
 import { onlinePaymentsEnabled } from "@/lib/payments/razorpay";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
@@ -71,12 +71,15 @@ async function StudentBilling() {
                 {a.mode === "batch" && (
                   <>
                     <p className="text-brown">
-                      Enrolment advance{a.advance.amountMinor > 0 ? ` (${formatMoney(a.advance.amountMinor)}, non-refundable)` : ""}: {ADVANCE_STATUS_LABELS[a.advance.status]}
-                      {a.advance.remainingMinor > 0 ? ` — ${formatMoney(a.advance.remainingMinor)} will be deducted from your next invoice` : ""}
+                      First-class payment{a.advance.amountMinor > 0 ? ` (${formatMoney(a.advance.amountMinor)}, non-refundable)` : ""}: {ADVANCE_STATUS_LABELS[a.advance.status]}
                     </p>
-                    {a.advance.status === "awaiting" && payOnline && <PayOnlineButton kind="advance" id={a.id} label={`Pay advance ${formatMoney(a.advance.amountMinor)}`} />}
+                    {a.blocked && <p className="text-xs text-destructive">{BATCH_BLOCK_MESSAGES[a.blocked]}</p>}
+                    {a.advance.status === "awaiting" && payOnline && (
+                      <PayOnlineButton kind="advance" id={a.id} label={`Pay ${formatMoney(a.advance.amountMinor)} for your first class`} />
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      Classes are invoiced at the end of each month (attended and missed classes are counted; classes cancelled by the academy are not).
+                      After your first class you are invoiced every four weeks for the classes actually held (attended and missed classes count; classes cancelled
+                      by the academy do not). Each invoice is due at the end of its fourth week — pay it before your next class.
                     </p>
                   </>
                 )}
@@ -86,7 +89,7 @@ async function StudentBilling() {
 
           {classBilling.uninvoiced.map((u) => (
             <p key={u.courseTitle} className="text-sm text-muted-foreground">
-              {u.courseTitle}: {u.count} class{u.count === 1 ? "" : "es"} so far, {formatMoney(u.amountMinor)} — to be invoiced after the month ends.
+              {u.courseTitle}: {u.count} class{u.count === 1 ? "" : "es"} so far, {formatMoney(u.amountMinor)} — to be invoiced at the end of the current four-week cycle.
             </p>
           ))}
 
@@ -96,10 +99,10 @@ async function StudentBilling() {
                 <li key={i.id} className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 text-sm shadow-soft">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-semibold text-brown">
-                      {i.courseTitle} — {periodLabel(i.period)}
+                      {i.courseTitle} — {i.label}
                     </span>
                     <span className="flex items-center gap-2">
-                      {i.summary.balanceMinor > 0 && i.dueState === "overdue" && <Badge variant="destructive">Past the payment deadline</Badge>}
+                      {i.summary.balanceMinor > 0 && i.dueState === "overdue" && <Badge variant="destructive">Overdue</Badge>}
                       {i.summary.balanceMinor > 0 && i.dueState === "grace" && <Badge variant="outline">Grace period</Badge>}
                       <Badge variant={i.summary.state === "paid" ? "gold" : i.summary.state === "partial" ? "outline" : "secondary"}>
                         {i.summary.state === "paid" ? "Paid" : i.summary.state === "partial" ? "Partly paid" : "Unpaid"}
@@ -115,13 +118,15 @@ async function StudentBilling() {
                   </ul>
                   <p className="text-brown">
                     {i.lines.length} class{i.lines.length === 1 ? "" : "es"}: {formatMoney(i.subtotalMinor)}
-                    {i.advanceAppliedMinor > 0 ? ` − ${formatMoney(i.advanceAppliedMinor)} enrolment advance` : ""}
+                    {i.advanceAppliedMinor > 0 ? ` − ${formatMoney(i.advanceAppliedMinor)} enrolment advance (monthly billing)` : ""}
                     {i.summary.creditsMinor > 0 || i.summary.debitsMinor > 0 ? " (with adjustments)" : ""} · total {formatMoney(i.summary.totalDueMinor)} · paid {formatMoney(i.summary.paidMinor)} ·{" "}
                     <span className="font-semibold">balance {formatMoney(Math.max(i.summary.balanceMinor, 0))}</span>
                   </p>
                   {i.summary.balanceMinor > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      Due {formatDate(i.dueAt)} · please pay by {formatDateTime(i.deadlineAt)} (IST) to avoid a pause in access.
+                      {i.kind === "cycle"
+                        ? `Due by ${formatDateTime(i.deadlineAt)} (IST). Unpaid after that, class links and lessons pause until the payment is verified.`
+                        : `Due ${formatDate(i.dueAt)} · please pay by ${formatDateTime(i.deadlineAt)} (IST) to avoid a pause in access.`}
                     </p>
                   )}
                   {i.summary.pendingMinor > 0 && <p className="text-xs text-muted-foreground">{formatMoney(i.summary.pendingMinor)} awaiting verification</p>}

@@ -12,14 +12,14 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
-import { ADVANCE_STATUS_LABELS, BILLING_MODE_LABELS, periodLabel } from "@/lib/lms/class-billing";
+import { ADVANCE_STATUS_LABELS, BILLING_MODE_LABELS } from "@/lib/lms/class-billing";
 import { listCourseOptions } from "@/lib/lms/server/batches";
 import { getClassBillingConfig, listBillingAccounts } from "@/lib/lms/server/class-billing";
 import { listStudentOptions } from "@/lib/lms/server/classes";
 
 export const metadata: Metadata = { title: "Billing · Teacher" };
 
-const DUE_LABEL = { not_due: "Due end of month", grace: "In grace period", overdue: "Past deadline" } as const;
+const DUE_LABEL = { not_due: "Not yet due", grace: "In grace period", overdue: "Overdue" } as const;
 
 async function Billing() {
   const teacher = await requireRole("teacher", "/teacher/billing");
@@ -46,13 +46,13 @@ async function Billing() {
 
       {!config.saved && (
         <p className="rounded-xl border border-gold/40 bg-gold-soft/50 px-4 py-3 text-sm text-brown">
-          Using the confirmed default rates: batch ₹400 per class per student (invoiced monthly), ₹400 enrolment advance, individual sessions ₹750 each.
+          Using the confirmed default rates: batch ₹400 per class per student (first class paid at enrolment, then four-week cycles), individual sessions ₹750 each.
         </p>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Billing accounts" value={rows.filter((r) => r.status === "active").length} detail="Batch and individual" icon={Users} />
-        <StatCard label="Outstanding invoices" value={formatMoney(outstanding)} detail={`${unpaid.length} unpaid monthly invoice(s)`} icon={AlertCircle} />
+        <StatCard label="Outstanding invoices" value={formatMoney(outstanding)} detail={`${unpaid.length} unpaid invoice(s)`} icon={AlertCircle} />
         <StatCard label="Suspended" value={suspended.length} detail="Unpaid after the payment deadline (reversible)" icon={ShieldAlert} />
         <StatCard label="Individual sessions due" value={formatMoney(sessionsDue.reduce((s, x) => s + x.amountMinor, 0))} detail={`${sessionsDue.length} unpaid session(s)`} icon={CalendarClock} />
       </div>
@@ -78,7 +78,7 @@ async function Billing() {
       )}
 
       <section aria-labelledby="unpaid" className="flex flex-col gap-3">
-        <h2 id="unpaid" className="type-h3">Unpaid monthly invoices</h2>
+        <h2 id="unpaid" className="type-h3">Unpaid invoices</h2>
         {unpaid.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">No unpaid invoices.</p>
         ) : (
@@ -89,9 +89,9 @@ async function Billing() {
                   <Link href={`/teacher/billing/${i.accountId}`} className="font-medium text-brown hover:text-maroon hover:underline">
                     {i.studentName}
                   </Link>{" "}
-                  · {i.courseTitle} · {periodLabel(i.period)}
+                  · {i.courseTitle} · {i.label}
                   <span className="block text-xs text-muted-foreground">
-                    Due {formatDate(i.dueAt)} · payment deadline {formatDateTime(i.deadlineAt)}
+                    {i.kind === "cycle" ? `Due ${formatDateTime(i.deadlineAt)}` : `Due ${formatDate(i.dueAt)} · payment deadline ${formatDateTime(i.deadlineAt)}`}
                   </span>
                 </span>
                 <span className="flex items-center gap-2">
@@ -176,7 +176,7 @@ export default function TeacherBillingPage() {
     <>
       <TeacherPageHeader
         title="Billing"
-        description="Batch classes are invoiced monthly (₹400 per class per student); individual sessions are paid per session (₹750). All dates are IST."
+        description="Batch classes: first class paid at enrolment, then invoiced per four-week cycle (₹400 per class per student). Individual sessions are paid per session (₹750). All dates are IST."
       />
       <Suspense fallback={<LoadingState label="Loading billing…" />}>
         <Billing />

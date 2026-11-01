@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
+import { AuthSwitchLink } from "@/components/auth/auth-switch-link";
 import { Mandala } from "@/components/decor/mandala";
 import { Ornament } from "@/components/decor/ornament";
 import { Logo } from "@/components/layout/logo";
@@ -29,9 +31,17 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
           {children}
           <p className="mt-8 text-center text-sm text-muted-foreground">
             {footer.text}{" "}
-            <Link href={footer.href} className="font-semibold text-maroon hover:underline">
-              {footer.linkLabel}
-            </Link>
+            <Suspense
+              fallback={
+                <Link href={footer.href} className="font-semibold text-maroon hover:underline">
+                  {footer.linkLabel}
+                </Link>
+              }
+            >
+              <AuthSwitchLink href={footer.href} className="font-semibold text-maroon hover:underline">
+                {footer.linkLabel}
+              </AuthSwitchLink>
+            </Suspense>
           </p>
         </div>
       </Container>

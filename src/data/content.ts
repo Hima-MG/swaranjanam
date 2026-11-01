@@ -61,7 +61,7 @@ export const features: Feature[] = [
     icon: HeartHandshake,
     title: "For Every Age",
     description:
-      "Swara Foundation for adults and Little Swaras for kids — siblings learning together get 10% off.",
+      "Swara Foundation for adults and Little Swaras for kids, in small batches or one-to-one.",
   },
 ];
 

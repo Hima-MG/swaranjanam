@@ -382,7 +382,8 @@ export interface AuditEntry {
     | "testimonial"
     | "batch"
     | "billingAccount"
-    | "invoice";
+    | "invoice"
+    | "enrolmentRequest";
   targetId: string;
   summary: string;
   at: string | null;

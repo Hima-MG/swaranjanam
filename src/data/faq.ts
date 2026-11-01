@@ -1,8 +1,9 @@
 // Frequently asked questions, from the academy's course details workbook
 // ("FAQ" sheet). The fee answer, marked there as "please check", uses the
 // fee details the academy has since confirmed (₹400 / ₹750 per session,
-// 10% off for siblings, billed at month end, no registration fee); the
-// amounts are filled in from the billing rates in force, never typed here.
+// billed at month end, no registration fee); the amounts are filled in from
+// the billing rates in force, never typed here. The sibling discount amount
+// is shown only once billing can apply it (SIBLING_DISCOUNT_ENABLED).
 // Policies the workbook marks as suggestions are not included.
 
 import { formatMoney } from "@/lib/format";
@@ -16,8 +17,8 @@ export interface FaqItem {
 
 export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
   const fees = fee
-    ? `Batch classes are ${formatMoney(fee.batchMinor)} per session per student, and individual classes are ${formatMoney(fee.individualMinor)} per session. Fees are paid at the end of each month for the classes conducted that month. There is no registration fee.`
-    : "Fees are charged per session and paid at the end of each month for the classes conducted that month. There is no registration fee.";
+    ? `Batch classes are ${formatMoney(fee.batchMinor)} per session per student: you pay ${formatMoney(fee.batchAdvanceMinor)} for your first class when you enrol, then you are invoiced every four weeks for the classes held (classes 2–4 first, then four at a time), due before your next class. Individual classes are ${formatMoney(fee.individualMinor)} per session, each paid separately. There is no registration fee.`
+    : "Fees are charged per session. Batch students pay for their first class when they enrol and are then invoiced every four weeks for the classes held; individual sessions are paid one at a time. There is no registration fee.";
   return [
     {
       question: "What are the class days and timings?",
@@ -34,12 +35,14 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
       answer: "Classes are 100% online via Google Meet. Each session is 1 hour long, once a week, in small batches of up to 5 students.",
     },
     { question: "What are the fees?", answer: fees },
-    {
-      question: "Is there a discount for siblings?",
-      answer: fee
-        ? `Yes – siblings, or two learners joining from one device, get ${fee.siblingDiscountPercent}% off: ${formatMoney(fee.siblingBatchMinor)} per learner per batch session.`
-        : "Yes – siblings, or two learners joining from one device, get 10% off.",
-    },
+    ...(fee?.siblingDiscount
+      ? [
+          {
+            question: "Is there a discount for siblings?",
+            answer: `Yes – siblings, or two learners joining from one device, get ${fee.siblingDiscount.percent}% off: ${formatMoney(fee.siblingDiscount.batchMinor)} per learner per batch session.`,
+          },
+        ]
+      : []),
     {
       question: "What if I miss a class?",
       answer:
@@ -70,7 +73,7 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
     },
     {
       question: "How do I enroll?",
-      answer: `Simply WhatsApp us at ${siteConfig.contact.whatsapp} and we'll take it from there! You'll be added to a batch and get access to your student dashboard the same day.`,
+      answer: `Choose an open course under Courses & fees and select “Enrol now” — you'll sign in or create a free account, pick a batch or individual classes and send your request. The academy places you in a batch, and your student dashboard opens. You can also WhatsApp us at ${siteConfig.contact.whatsapp}.`,
     },
   ];
 }

@@ -8,7 +8,8 @@ import { readReceiptContext, writeReceipt } from "@/lib/lms/server/billing";
 import { applyVerifiedPayment, evaluateSuspension, readPaymentTarget, type PaymentTarget } from "@/lib/lms/server/class-billing";
 import { col, db, toIso } from "@/lib/lms/server/db";
 import type { PaymentRecord } from "@/lib/lms/types";
-import { assertTestPaymentEnvironment, createRazorpayOrder, readRazorpayConfig } from "@/lib/payments/razorpay";
+import { assertTestPaymentEnvironment, createRazorpayOrder, fetchRazorpayPayment, GatewayConfigError, readRazorpayConfig } from "@/lib/payments/razorpay";
+import { verifyCheckoutSignature } from "@/lib/payments/razorpay-signature";
 
 // Razorpay (test mode) for class-based billing: the registration advance and
 // monthly batch invoices and individual sessions.
@@ -225,4 +226,52 @@ export async function claimWebhookEvent(eventId: string, event: string): Promise
 export async function gatewayOrderOwner(orderId: string): Promise<{ studentId: string; createdAt: string | null } | null> {
   const snap = await col("gatewayOrders").doc(orderId).get();
   return snap.exists ? { studentId: String(snap.get("studentId") ?? ""), createdAt: toIso(snap.get("createdAt")) } : null;
+}
+
+export interface ConfirmedCheckout {
+  status: "recorded" | "already_recorded" | "processing";
+  receiptNumber: string | null;
+}
+
+/**
+ * Called after Razorpay Checkout reports success in the student's browser.
+ * The browser's message is NOT trusted: the order must belong to this
+ * student, the checkout signature is verified with the key secret, and the
+ * payment is fetched from Razorpay before anything is recorded (through the
+ * same idempotent processor the webhook uses).
+ */
+export async function confirmCheckoutPayment(
+  user: SessionUser,
+  input: { orderId: unknown; paymentId: unknown; signature: unknown },
+): Promise<ConfirmedCheckout> {
+  const orderId = typeof input?.orderId === "string" && /^order_[A-Za-z0-9]+$/.test(input.orderId) ? input.orderId : null;
+  const paymentId = typeof input?.paymentId === "string" && /^pay_[A-Za-z0-9]+$/.test(input.paymentId) ? input.paymentId : null;
+  if (!orderId || !paymentId) throw new AccessError("The payment could not be verified.");
+  let config: ReturnType<typeof readRazorpayConfig>;
+  try {
+    config = readRazorpayConfig();
+  } catch (error) {
+    // Includes the fail-closed environment check (Test Mode never records into production).
+    if (error instanceof GatewayConfigError) throw new AccessError("Online payment is not available right now.");
+    throw error;
+  }
+  if (!config) throw new AccessError("Online payment is not available right now.");
+  const owner = await gatewayOrderOwner(orderId);
+  if (!owner || owner.studentId !== user.uid) throw new AccessError("The payment could not be verified.");
+  if (!verifyCheckoutSignature(orderId, paymentId, input.signature, config.keySecret)) {
+    throw new AccessError("The payment could not be verified. If money was deducted, it will be confirmed automatically or the academy will contact you.");
+  }
+  const payment = await fetchRazorpayPayment(config, paymentId);
+  if (payment.order_id !== orderId) throw new AccessError("The payment could not be verified.");
+  const result = await processVerifiedGatewayPayment({
+    orderId,
+    paymentId,
+    amountMinor: payment.amount,
+    currency: payment.currency,
+    status: payment.status,
+    via: "checkout",
+  });
+  if (result.outcome === "not_captured") return { status: "processing", receiptNumber: null };
+  if (result.outcome === "duplicate") return { status: "already_recorded", receiptNumber: null };
+  return { status: "recorded", receiptNumber: result.receiptNumber };
 }

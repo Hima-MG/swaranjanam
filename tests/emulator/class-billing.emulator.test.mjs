@@ -517,7 +517,7 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
     assert.equal(bySlug.has(`template-${run}`), false, "unreviewed template course hidden");
     assert.equal(bySlug.has("little-swaras"), false, "a draft with an approved slug is not replaced by the fallback");
     assert.equal(bySlug.get("swara-foundation")?.source, "approved", "approved fallback shown");
-    assert.deepEqual(bySlug.get(`teacher-open-${run}`)?.fee, { batchMinor: 40_000, individualMinor: 75_000, siblingBatchMinor: 36_000, siblingDiscountPercent: 10 });
+    assert.deepEqual(bySlug.get(`teacher-open-${run}`)?.fee, { batchMinor: 40_000, individualMinor: 75_000, batchAdvanceMinor: 40_000, siblingDiscount: null });
     assert.equal(bySlug.get(`teacher-soon-${run}`)?.fee, null);
     assert.doesNotMatch(JSON.stringify(result.data), /9999|4999|teacher-1/, "no legacy price or teacher ids");
     assert.deepEqual(await getPublicFees(), bySlug.get("swara-foundation").fee);
@@ -557,5 +557,159 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
     assert.equal("price" in open.value, false);
     assert.equal(parseCatalogInput({ availability: "" }).value.availability, null);
     assert.ok(parseCatalogInput({ availability: "free" }).errors.availability);
+  });
+});
+
+describe("website enrolment + Razorpay Test Mode checkout (existing payment flow)", () => {
+  const ENV = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET", "RAZORPAY_TEST_FIREBASE_PROJECTS"];
+  const saved = {};
+  // Fake TEST credentials, generated here. Razorpay's API is replaced by a local fake below: no network, no real money.
+  const KEY_SECRET = `fake_${randomUUID()}`;
+  const WEBHOOK_SECRET = `whsec_${randomUUID()}`;
+  const realFetch = globalThis.fetch;
+  const razorpay = { orders: 0, payments: new Map() };
+  const student = (uid) => ({ uid, email: `${uid}@example.test`, name: uid, role: "student" });
+  const sign = (orderId, paymentId) => createHmac("sha256", KEY_SECRET).update(`${orderId}|${paymentId}`).digest("hex");
+  const enrolCourse = id("enrol-course");
+  const enrolSlug = `enrol-course-${run}`;
+
+  before(async () => {
+    for (const k of ENV) saved[k] = process.env[k];
+    Object.assign(process.env, { RAZORPAY_KEY_ID: "rzp_test_FakeKey123", RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_TEST_FIREBASE_PROJECTS: "" });
+    // Only api.razorpay.com is faked; the Firestore emulator still uses the real fetch.
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (!u.startsWith("https://api.razorpay.com/")) return realFetch(url, init);
+      if (u.endsWith("/v1/orders") && init?.method === "POST") {
+        const body = JSON.parse(init.body);
+        razorpay.orders++;
+        return Response.json({ id: `order_Enr${run.replace(/-/g, "")}${razorpay.orders}`, amount: body.amount, currency: body.currency, receipt: body.receipt, status: "created" });
+      }
+      const m = u.match(/\/v1\/payments\/(pay_[A-Za-z0-9]+)$/);
+      if (m && razorpay.payments.has(m[1])) return Response.json(razorpay.payments.get(m[1]));
+      return new Response("{}", { status: 404 });
+    };
+    await db.collection("courses").doc(enrolCourse).set({ id: enrolCourse, slug: enrolSlug, title: "Enrol Course", description: "", status: "published", availability: "open", teacherIds: [teacher.uid] });
+    await db.collection("courses").doc(id("soon-course")).set({ id: id("soon-course"), slug: `soon-course-${run}`, title: "Soon", description: "", status: "published", availability: "coming_soon", teacherIds: [teacher.uid] });
+  });
+  after(() => {
+    globalThis.fetch = realFetch;
+    for (const k of ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  /** The academy places the student with the EXISTING tools (old dues, course enrolment, batch). */
+  async function placeInBatch(uid) {
+    await db.collection("enrollments").doc(`${enrolCourse}_${uid}`).set({ id: `${enrolCourse}_${uid}`, studentId: uid, courseId: enrolCourse, status: "active", agreedFee: null, currency: "INR" });
+    await db.collection("legacyDues").doc(uid).set({ studentId: uid, status: "no_previous_dues", note: "test", verifiedBy: teacher.uid, verifiedByEmail: teacher.email, verifiedAt: FieldValue.serverTimestamp() });
+    const batchRef = db.collection("batches").doc(id(`enrol-batch-${uid}`));
+    await batchRef.set({ name: "Enrol batch", courseId: enrolCourse, courseTitle: "Enrol Course", teacherId: teacher.uid, teacherName: "Teacher", schedule: "Sat", meetUrl: "https://meet.google.com/abc-defg-hij", capacity: 5, memberCount: 0, status: "active" });
+    return (await addMemberTx(teacher, batchRef.id, { uid, name: uid })).accountId;
+  }
+  const paymentsFor = async (accountId) => (await db.collection("payments").where("accountId", "==", accountId).get()).size;
+
+  test("coming-soon, unknown and teacher enrolment attempts are refused; nothing is created", async () => {
+    const enrolment = await import("@/lib/lms/server/enrolment");
+    await assert.rejects(enrolment.createEnrolmentRequest(student("e0"), { slug: `soon-course-${run}`, mode: "batch", note: "" }), /coming soon/);
+    await assert.rejects(enrolment.createEnrolmentRequest(student("e0"), { slug: "voice-culture", mode: "batch", note: "" }), /coming soon/);
+    await assert.rejects(enrolment.createEnrolmentRequest(student("e0"), { slug: "no-such-course", mode: "batch", note: "" }), /could not be found/);
+    await assert.rejects(enrolment.createEnrolmentRequest({ ...student("t0"), role: "teacher" }, { slug: enrolSlug, mode: "batch", note: "" }), /Only student/);
+    await assert.rejects(enrolment.createEnrolmentRequest(student("e0"), { slug: enrolSlug, mode: "monthly-package", note: "" }), /highlighted/);
+    assert.equal((await db.collection("enrolmentRequests").where("studentId", "==", "e0").get()).size, 0);
+    assert.equal((await db.collection("billingAccounts").where("studentId", "==", "e0").get()).size, 0);
+  });
+
+  test("a request is idempotent and creates no billing account, charge or payment", async () => {
+    const enrolment = await import("@/lib/lms/server/enrolment");
+    const first = await enrolment.createEnrolmentRequest(student("e1"), { slug: enrolSlug, mode: "batch", note: "Saturdays please" });
+    assert.equal(first.outcome, "created");
+    assert.equal((await enrolment.createEnrolmentRequest(student("e1"), { slug: enrolSlug, mode: "batch", note: "" })).outcome, "already_pending");
+    const state = await enrolment.getOwnEnrolmentState(student("e1"), { id: enrolCourse, slug: enrolSlug });
+    assert.equal(state.request.status, "pending");
+    assert.equal(state.batch, null);
+    assert.equal((await db.collection("billingAccounts").where("studentId", "==", "e1").get()).size, 0);
+    assert.equal((await db.collection("payments").where("studentId", "==", "e1").get()).size, 0);
+    // Teacher handles it; a handled request does not re-open a second account.
+    await enrolment.resolveEnrolmentRequest(teacher, first.requestId, "handled", "");
+    await assert.rejects(enrolment.resolveEnrolmentRequest(student("e1"), first.requestId, "handled", ""), /Only the academy/);
+  });
+
+  test("successful checkout: the ₹400 advance is recorded only after server-side verification", async () => {
+    const gateway = await import("@/lib/lms/server/gateway");
+    const accountId = await placeInBatch("e2");
+    const state = await (await import("@/lib/lms/server/enrolment")).getOwnEnrolmentState(student("e2"), { id: enrolCourse, slug: enrolSlug });
+    assert.equal(state.batch.advance.status, "awaiting");
+    const order = await gateway.createOrderForStudent(student("e2"), { kind: "advance", accountId });
+    assert.equal(order.amountMinor, 40_000, "server-calculated: the advance, never a full course fee");
+    assert.equal(order.keyId, "rzp_test_FakeKey123");
+    // Opening checkout records nothing.
+    assert.equal((await account(accountId)).advance.status, "awaiting");
+    razorpay.payments.set("pay_E2ok", { id: "pay_E2ok", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" });
+    const result = await gateway.confirmCheckoutPayment(student("e2"), { orderId: order.orderId, paymentId: "pay_E2ok", signature: sign(order.orderId, "pay_E2ok") });
+    assert.equal(result.status, "recorded");
+    assert.equal((await account(accountId)).advance.status, "verified");
+    assert.equal((await db.collection("receipts").doc("rzp_pay_E2ok").get()).exists, true);
+    assert.equal(await paymentsFor(accountId), 1);
+  });
+
+  test("cancelled checkout: nothing is recorded, and reopening reuses the same order", async () => {
+    const gateway = await import("@/lib/lms/server/gateway");
+    const accountId = await placeInBatch("e3");
+    const before = razorpay.orders;
+    const first = await gateway.createOrderForStudent(student("e3"), { kind: "advance", accountId });
+    // The student closes Checkout: no confirmation call, no webhook.
+    assert.equal((await account(accountId)).advance.status, "awaiting");
+    assert.equal(await paymentsFor(accountId), 0);
+    const again = await gateway.createOrderForStudent(student("e3"), { kind: "advance", accountId });
+    assert.equal(again.orderId, first.orderId);
+    assert.equal(razorpay.orders - before, 1, "one Razorpay order, not one per attempt");
+  });
+
+  test("failed verification: bad signature, another student's order, mismatched or uncaptured payment record nothing", async () => {
+    const gateway = await import("@/lib/lms/server/gateway");
+    const accountId = await placeInBatch("e4");
+    const order = await gateway.createOrderForStudent(student("e4"), { kind: "advance", accountId });
+    razorpay.payments.set("pay_E4ok", { id: "pay_E4ok", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" });
+    // A browser claiming success with a forged signature.
+    await assert.rejects(gateway.confirmCheckoutPayment(student("e4"), { orderId: order.orderId, paymentId: "pay_E4ok", signature: "0".repeat(64) }), /could not be verified/);
+    // Someone else's session confirming this order.
+    await assert.rejects(gateway.confirmCheckoutPayment(student("intruder"), { orderId: order.orderId, paymentId: "pay_E4ok", signature: sign(order.orderId, "pay_E4ok") }), /could not be verified/);
+    // A valid signature for a payment that Razorpay says belongs to another order.
+    razorpay.payments.set("pay_E4other", { id: "pay_E4other", order_id: "order_Somethingelse", amount: 40_000, currency: "INR", status: "captured" });
+    await assert.rejects(gateway.confirmCheckoutPayment(student("e4"), { orderId: order.orderId, paymentId: "pay_E4other", signature: sign(order.orderId, "pay_E4other") }), /could not be verified/);
+    // A failed / not-yet-captured payment.
+    razorpay.payments.set("pay_E4fail", { id: "pay_E4fail", order_id: order.orderId, amount: 40_000, currency: "INR", status: "failed" });
+    assert.equal((await gateway.confirmCheckoutPayment(student("e4"), { orderId: order.orderId, paymentId: "pay_E4fail", signature: sign(order.orderId, "pay_E4fail") })).status, "processing");
+    assert.equal((await account(accountId)).advance.status, "awaiting");
+    assert.equal(await paymentsFor(accountId), 0);
+  });
+
+  test("duplicate webhook deliveries (and checkout + webhook together) record the advance once", async () => {
+    const gateway = await import("@/lib/lms/server/gateway");
+    const { POST } = await import("@/app/api/payments/razorpay/webhook/route");
+    const accountId = await placeInBatch("e5");
+    const order = await gateway.createOrderForStudent(student("e5"), { kind: "advance", accountId });
+    const body = JSON.stringify({ event: "payment.captured", payload: { payment: { entity: { id: "pay_E5ok", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" } } } });
+    const deliver = (eventId) =>
+      POST(new Request("http://localhost/api/payments/razorpay/webhook", { method: "POST", body, headers: { "x-razorpay-signature": createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex"), "x-razorpay-event-id": eventId } }));
+    const first = await (await deliver(`evt_E5a${run}`)).json();
+    assert.equal(first.outcome, "recorded");
+    assert.equal((await (await deliver(`evt_E5a${run}`)).json()).duplicate, true, "same event id redelivered");
+    assert.equal((await (await deliver(`evt_E5b${run}`)).json()).outcome, "duplicate", "different event, same payment");
+    razorpay.payments.set("pay_E5ok", { id: "pay_E5ok", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" });
+    assert.equal((await gateway.confirmCheckoutPayment(student("e5"), { orderId: order.orderId, paymentId: "pay_E5ok", signature: sign(order.orderId, "pay_E5ok") })).status, "already_recorded");
+    // A forged webhook is rejected before anything is read.
+    const forged = await POST(new Request("http://localhost/api/payments/razorpay/webhook", { method: "POST", body, headers: { "x-razorpay-signature": "f".repeat(64), "x-razorpay-event-id": `evt_E5c${run}` } }));
+    assert.equal(forged.status, 401);
+    assert.equal(await paymentsFor(accountId), 1);
+    assert.equal((await account(accountId)).advance.status, "verified");
+  });
+
+  test("a student with an active billing account cannot open a second request for that course", async () => {
+    const enrolment = await import("@/lib/lms/server/enrolment");
+    await placeInBatch("e6");
+    await assert.rejects(enrolment.createEnrolmentRequest(student("e6"), { slug: enrolSlug, mode: "batch", note: "" }), /already enrolled/);
   });
 });

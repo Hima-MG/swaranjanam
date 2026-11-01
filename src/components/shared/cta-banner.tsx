@@ -5,7 +5,6 @@ import { Mandala } from "@/components/decor/mandala";
 import { Ornament } from "@/components/decor/ornament";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
-import { siteConfig } from "@/config/site";
 
 interface CtaBannerProps {
   title?: string;
@@ -14,7 +13,7 @@ interface CtaBannerProps {
 
 export function CtaBanner({
   title = "Begin your musical journey today",
-  description = "WhatsApp us to enrol. You'll be added to a batch and get access to your student dashboard the same day.",
+  description = "Choose an open course, sign in or create a free account and send your enrolment request — nothing is charged until you are placed in a batch.",
 }: CtaBannerProps) {
   return (
     <section className="py-16 sm:py-24">
@@ -28,9 +27,9 @@ export function CtaBanner({
             <p className="type-lead text-cream/80">{description}</p>
             <div className="mt-2 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" variant="gold">
-                <a href={siteConfig.contact.whatsappUrl} target="_blank" rel="noopener noreferrer">
-                  Enrol on WhatsApp <ArrowRight data-icon="inline-end" />
-                </a>
+                <Link href="/#courses">
+                  Enrol now <ArrowRight data-icon="inline-end" />
+                </Link>
               </Button>
               <Button
                 asChild

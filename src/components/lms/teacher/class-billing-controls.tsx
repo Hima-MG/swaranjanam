@@ -1,10 +1,9 @@
 "use client";
 
-import { BadgeCheck, FilePlus2, Lock, PlayCircle, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
+import { FilePlus2, Lock, PlayCircle, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
 
 import {
   addRateVersion,
-  applyAdvanceToInvoice,
   closeBillingAccount,
   openIndividualAccount,
   recordInvoiceAdjustment,
@@ -44,23 +43,6 @@ export function RunBillingButton() {
       {error && <FormAlert tone="error">{error}</FormAlert>}
       {success && <FormAlert tone="success">{success}</FormAlert>}
     </div>
-  );
-}
-
-export function ApplyAdvanceButton({ invoiceId }: { invoiceId: string }) {
-  return (
-    <ActionDialog
-      trigger={
-        <Button type="button" variant="outline" size="sm">
-          <BadgeCheck data-icon="inline-start" />
-          Apply advance
-        </Button>
-      }
-      title="Apply the unused advance to this invoice?"
-      description="Uses the verified enrolment advance that has not been applied yet (up to the invoice balance). Recorded in the advance ledger; it can never be applied twice."
-      confirmLabel="Apply advance"
-      action={() => applyAdvanceToInvoice(invoiceId)}
-    />
   );
 }
 
@@ -194,7 +176,8 @@ export function PolicyForm({ policy }: { policy: BillingPolicy }) {
       onSubmit={(event) => {
         event.preventDefault();
         const d = new FormData(event.currentTarget);
-        run(() => updateClassBillingPolicy({ batchStudentCancelled: d.get("batchStudentCancelled"), advanceBeforeScheduling: d.get("advanceBeforeScheduling") === "on" }), {
+        // advanceBeforeScheduling is kept as stored: the first class's link is now withheld until the first-class payment is verified.
+        run(() => updateClassBillingPolicy({ batchStudentCancelled: d.get("batchStudentCancelled"), advanceBeforeScheduling: policy.advanceBeforeScheduling }), {
           success: "Policy saved.",
         });
       }}
@@ -207,12 +190,6 @@ export function PolicyForm({ policy }: { policy: BillingPolicy }) {
           </NativeSelect>
           <Pending />
         </Field>
-        <label className="flex items-start gap-3 text-sm text-brown">
-          <input type="checkbox" name="advanceBeforeScheduling" defaultChecked={policy.advanceBeforeScheduling} className="mt-0.5 size-4 accent-maroon" />
-          <span>
-            Require a verified ₹400 advance before a student&apos;s batch classes can be scheduled <Pending />
-          </span>
-        </label>
       </fieldset>
       {error && <FormAlert tone="error">{error}</FormAlert>}
       {success && <FormAlert tone="success">{success}</FormAlert>}

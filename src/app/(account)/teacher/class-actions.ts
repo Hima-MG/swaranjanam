@@ -19,6 +19,8 @@ import {
   applyClassCharge,
   applySessionCancel,
   classBillingConfigRef,
+  evaluateSuspension,
+  issueDueCycleInvoices,
   mapAccount,
   mapConfig,
   prepareClassCharge,
@@ -463,15 +465,26 @@ export async function recordClassOutcome(classId: unknown, attendanceInput: unkn
         creditsRemaining,
         packageId: existing.packageId,
         chargeKind: charge.kind,
+        coversFirst: charge.kind === "charge" && charge.coversFirst,
+        accountId: charge.kind === "charge" ? charge.account.id : null,
       };
     });
+    // A class in a cycle's final week issues that cycle's invoice now (idempotent);
+    // the scheduled job issues it at the checkpoint otherwise.
+    let issued: string[] = [];
+    if (info.accountId) {
+      issued = (await issueDueCycleInvoices(info.accountId, user)).created;
+      await evaluateSuspension(info.accountId, user);
+    }
     await writeAudit(user, {
       action: "class.outcome",
       targetType: "student",
       targetId: info.studentId,
       summary: `Recorded "${info.title}" as completed (attendance: ${attendance})${
         info.packageId ? (info.consumed ? ` — 1 package credit used, ${info.creditsRemaining} left` : " — credit already counted for this session") : ""
-      }${info.chargeKind === "charge" ? " — charged to this month's batch billing" : info.chargeKind === "already" ? " — already charged" : ""}`,
+      }${info.chargeKind === "charge" ? (info.coversFirst ? " — first class, paid by the first-class payment" : " — charged to the current billing cycle") : info.chargeKind === "already" ? " — already charged" : ""}${
+        issued.length ? ` — invoice issued (${issued.join(", ")})` : ""
+      }`,
     });
     refresh();
     return null;

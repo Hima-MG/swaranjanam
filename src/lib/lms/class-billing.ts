@@ -7,19 +7,26 @@
 // Money is always integer paise.
 //
 // CONFIRMED BY THE ACADEMY
-// Batch classes (monthly billing):
-//   * ₹400 per student per billable class; billed per calendar month.
-//   * One monthly invoice per student for the classes of that month.
-//   * One-time ₹400 enrolment advance, applied (once) to the first monthly
-//     invoice issued after it is VERIFIED; any unused part is carried forward.
+// Batch classes (four-week billing cycles):
+//   * ₹400 per student per eligible class.
+//   * The ₹400 paid at enrolment (the "first-class payment", stored as the
+//     account's advance) pays for the student's FIRST eligible class. That class
+//     is never invoiced. Its Meet link is withheld until the payment is verified.
+//   * Week 1 starts on the IST date of the student's first eligible class.
+//     Cycle k covers weeks 4k−3 … 4k. Its invoice lists the eligible classes
+//     actually held (cycle 1: classes 2–4 = ₹1,200; then four classes = ₹1,600),
+//     never future or invented classes — a cancelled class gives a smaller invoice.
+//   * The invoice is issued once a class in the cycle's final week has been
+//     recorded, or at the checkpoint (end of week 4k) at the latest. It is due
+//     at the checkpoint; unpaid after it → reversible suspension (Meet links,
+//     lessons, materials) until the payment is verified.
 //   * Attended and absent are billable. Academy cancellation is not billable.
 //     A rescheduled occurrence is not billed; the replacement is billed when held.
 //     Unknown attendance is not billed until a billable outcome is recorded.
-//   * Due at the end of the month, with a 7-calendar-day grace period; unpaid
-//     after the grace period → reversible access suspension; restored after
-//     verified payment.
+//   * Monthly invoices (the previous model) are no longer generated; any that
+//     exist are kept as read-only history with their original deadlines.
 // Individual one-to-one sessions:
-//   * ₹750 per session, each paid separately (no monthly invoice, no cycles).
+//   * ₹750 per session, each paid separately (never on a batch cycle invoice).
 //   * Student cancellation ≥ 24 h before the start: no charge; < 24 h: payable.
 //   * Academy cancellation: no charge. Rescheduling never creates a second charge.
 // Rates: versioned; a change applies to everyone from the next calendar month.
@@ -67,14 +74,6 @@ export function isWebsiteBilledPeriod(period: string): boolean {
   return isPeriod(period) && period >= BILLING_START_PERIOD;
 }
 
-/** Completed periods from BILLING_START_PERIOD up to (not including) the current IST month. */
-export function completedPeriods(nowIso: string): string[] {
-  const current = periodOf(nowIso);
-  const out: string[] = [];
-  for (let p = BILLING_START_PERIOD; p < current; p = nextPeriod(p)) out.push(p);
-  return out;
-}
-
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** "2026-11" → "November 2026" (fixed names: identical on server and browser). */
@@ -84,9 +83,9 @@ export function periodLabel(period: string): string {
   return `${MONTHS[m - 1]} ${y}`;
 }
 
-// --- Due dates and the grace period ------------------------------------------------------------
+// --- Previous monthly model: due dates (only to show existing monthly invoices) -------------------
 
-/** Grace period after the due date (calendar days). */
+/** Grace period after a monthly invoice's due date (calendar days). */
 export const GRACE_DAYS = 7;
 
 /**
@@ -108,20 +107,13 @@ export function paymentDeadline(period: string): string {
 
 export type DueState = "not_due" | "grace" | "overdue";
 
-/** not_due ≤ due date < grace ≤ deadline < overdue. */
-export function dueState(period: string, nowMs: number): DueState {
-  if (nowMs <= Date.parse(invoiceDueAt(period))) return "not_due";
-  if (nowMs <= Date.parse(paymentDeadline(period))) return "grace";
-  return "overdue";
-}
-
 // --- Rates (versioned, next-month changes) ----------------------------------------------------
 
 export const BILLING_MODES = ["batch", "individual"] as const;
 export type BillingMode = (typeof BILLING_MODES)[number];
 
 export const BILLING_MODE_LABELS: Record<BillingMode, string> = {
-  batch: "Batch classes (monthly)",
+  batch: "Batch classes (four-week cycles)",
   individual: "Individual sessions (pay per session)",
 };
 
@@ -180,7 +172,8 @@ export const DEFAULT_POLICY: BillingPolicy = { batchStudentCancelled: "not_billa
 
 export const PENDING_DECISIONS: { key: string; question: string }[] = [
   { key: "batchStudentCancelled", question: "Batch classes: is a class cancelled by the student billable? (Default: not billed.)" },
-  { key: "advanceBeforeScheduling", question: "Must the ₹400 advance be verified before a student's first batch class is scheduled? (Default: no.)" },
+  { key: "noFinalWeekClass", question: "If no class takes place in a cycle's final week, the invoice is issued at the checkpoint and is due at once (access pauses until paid). Should a grace period apply in that case?" },
+  { key: "firstClassRateChange", question: "If the per-class rate changes, does the ₹400 first-class payment still cover the whole first class? (Currently: yes, no top-up or credit.)" },
   { key: "restoration", question: "Restoration is automatic once every invoice past its deadline is paid. Should any other condition apply?" },
   { key: "rescheduledPaidSession", question: "Individual session paid and then cancelled for rescheduling: transfer to the new session or refund? (Flagged for review.)" },
 ];
@@ -266,15 +259,16 @@ export type AdvanceStatus = (typeof ADVANCE_STATUSES)[number];
 export const ADVANCE_STATUS_LABELS: Record<AdvanceStatus, string> = {
   not_required: "Not required",
   awaiting: "Awaiting payment",
-  verified: "Received — not yet used",
-  applied: "Fully applied to invoices",
+  verified: "Paid — covers the first class",
+  // Previous monthly model only: the advance was credited to a monthly invoice.
+  applied: "Applied to a monthly invoice",
   // Historical status name: only ever set when a payment recorded in error is reversed.
   refunded: "Reversed (payment error)",
 };
 
 /** Approved policy: the batch enrolment advance is non-refundable, including when a student stops early. */
 export const ADVANCE_NON_REFUNDABLE = true;
-export const ADVANCE_POLICY_TEXT = "The enrolment advance is non-refundable, including if the student stops early. It is deducted from the first monthly invoice after it is verified.";
+export const ADVANCE_POLICY_TEXT = "The first-class payment is non-refundable, including if the student stops early. It pays for the first class, which is never invoiced again.";
 
 /**
  * The only way to undo a recorded advance payment: correcting a payment
@@ -301,15 +295,9 @@ export function advanceReversalError(input: { reason: unknown; appliedMinor: num
 export interface AdvanceState {
   status: AdvanceStatus;
   amountMinor: number;
-  /** Total already applied to invoices (never more than amountMinor). */
+  /** Previous monthly model only: amount credited to monthly invoices. Always 0 for cycle billing. */
   appliedMinor: number;
   paymentId: string | null;
-}
-
-/** Unused, VERIFIED advance that may still be applied. Unpaid/unverified → 0. */
-export function advanceRemaining(a: AdvanceState): number {
-  if (a.status !== "verified") return 0;
-  return Math.max(a.amountMinor - Math.max(a.appliedMinor, 0), 0);
 }
 
 export function initialAdvance(mode: BillingMode, version: RateVersion): AdvanceState {
@@ -318,21 +306,20 @@ export function initialAdvance(mode: BillingMode, version: RateVersion): Advance
     : { status: "not_required", amountMinor: 0, appliedMinor: 0, paymentId: null };
 }
 
-/** Advance after applying `minor` of it. */
-export function advanceAfterApplying(a: AdvanceState, minor: number): AdvanceState {
-  const appliedMinor = a.appliedMinor + minor;
-  return { ...a, appliedMinor, status: appliedMinor >= a.amountMinor ? "applied" : a.status };
+// --- Invoices: four-week cycles ------------------------------------------------------------------------
+
+export function accountIdFor(studentId: string, courseId: string, mode: BillingMode): string {
+  return `ba_${studentId}_${courseId}_${mode}`;
 }
 
-// --- Monthly invoices ------------------------------------------------------------------------------------
-
-/** Deterministic: one invoice per batch account per month (create-once → retries never duplicate). */
+/** Previous monthly model (read-only history): `${accountId}_${YYYY-MM}`. */
 export function monthlyInvoiceId(accountId: string, period: string): string {
   return `${accountId}_${period}`;
 }
 
-export function accountIdFor(studentId: string, courseId: string, mode: BillingMode): string {
-  return `ba_${studentId}_${courseId}_${mode}`;
+/** Deterministic: one invoice per batch account per cycle (create-once → retries never duplicate). */
+export function cycleInvoiceId(accountId: string, cycle: number): string {
+  return `${accountId}_c${cycle}`;
 }
 
 export interface InvoiceLine {
@@ -342,31 +329,84 @@ export interface InvoiceLine {
   outcome: ClassOutcome;
   rateMinor: number;
   rateVersionId: string;
-  /** Month the class took place in (late-recorded classes may be invoiced in a later month). */
+  /** Month the class took place in (the rate in force that month applies). */
   period: string;
 }
 
-export interface MonthlyInvoiceDraft {
-  subtotalMinor: number;
-  advanceAppliedMinor: number;
-  amountDueMinor: number;
-  advanceAfter: AdvanceState;
+export const CYCLE_WEEKS = 4;
+const WEEK_MS = 7 * DAY_MS;
+const CYCLE_MS = CYCLE_WEEKS * WEEK_MS;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** "YYYY-MM-DD" of an instant, in IST. */
+export function istDateOf(iso: string): string {
+  return new Date(Date.parse(iso) + IST_MS).toISOString().slice(0, 10);
+}
+
+/** 00:00 IST on the anchor date = the start of the student's week 1. */
+export function cycleStartMs(anchorDate: string, cycle = 1): number {
+  if (!DATE.test(anchorDate)) throw new Error("Invalid cycle anchor date");
+  const [y, m, d] = anchorDate.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) - IST_MS + (cycle - 1) * CYCLE_MS;
+}
+
+/** The checkpoint (= due date) of cycle k: the last instant of week 4k, IST. */
+export function cycleCheckpoint(anchorDate: string, cycle: number): string {
+  return new Date(cycleStartMs(anchorDate, cycle + 1) - 1).toISOString();
+}
+
+/** Start of cycle k's final week (week 4k). */
+export function cycleFinalWeekStartMs(anchorDate: string, cycle: number): number {
+  return cycleStartMs(anchorDate, cycle + 1) - WEEK_MS;
+}
+
+/** Cycle (1-based) an instant falls in; anything before week 1 counts as cycle 1. */
+export function cycleOf(anchorDate: string, iso: string): number {
+  return Math.max(1, Math.floor((Date.parse(iso) - cycleStartMs(anchorDate)) / CYCLE_MS) + 1);
+}
+
+/** "Weeks 1–4" for cycle 1, "weeks 5–8" for cycle 2 … */
+export function cycleWeeksLabel(cycle: number): string {
+  return `weeks ${CYCLE_WEEKS * (cycle - 1) + 1}–${CYCLE_WEEKS * cycle}`;
+}
+
+export interface ChargeLike {
+  classId: string;
+  startAt: string;
+  invoiceId: string | null;
+  /** "advance" = the first class, paid by the first-class payment; never invoiced. */
+  coveredBy: "advance" | null;
 }
 
 /**
- * Builds a month's invoice. Only a VERIFIED advance is applied, once, up to
- * the subtotal; any unused part stays on the account for the next invoice.
- * Example: 8 classes × ₹400 = ₹3,200 − ₹400 advance = ₹2,800.
+ * Whether cycle k's invoice may be issued: its checkpoint has passed, or a
+ * class in its final week has been charged. Future classes never count.
  */
-export function buildMonthlyInvoice(input: { lines: readonly InvoiceLine[]; advance: AdvanceState }): MonthlyInvoiceDraft {
-  const subtotalMinor = input.lines.reduce((s, l) => s + l.rateMinor, 0);
-  const advanceAppliedMinor = Math.min(advanceRemaining(input.advance), subtotalMinor);
-  return {
-    subtotalMinor,
-    advanceAppliedMinor,
-    amountDueMinor: subtotalMinor - advanceAppliedMinor,
-    advanceAfter: advanceAppliedMinor > 0 ? advanceAfterApplying(input.advance, advanceAppliedMinor) : input.advance,
-  };
+export function cycleReady(input: { anchorDate: string; cycle: number; nowMs: number; charges: readonly Pick<ChargeLike, "startAt">[] }): boolean {
+  const end = cycleStartMs(input.anchorDate, input.cycle + 1);
+  if (input.nowMs >= end) return true;
+  const finalWeek = end - WEEK_MS;
+  return input.charges.some((c) => {
+    const t = Date.parse(c.startAt);
+    return t >= finalWeek && t < end && t <= input.nowMs;
+  });
+}
+
+/**
+ * The charges cycle k's invoice covers: every charge that took place before the
+ * cycle ends and is not invoiced yet and not the prepaid first class (a class
+ * recorded late is picked up by the next invoice). Sorted by time.
+ */
+export function cycleLines<C extends ChargeLike>(charges: readonly C[], anchorDate: string, cycle: number): C[] {
+  const end = cycleStartMs(anchorDate, cycle + 1);
+  return charges
+    .filter((c) => c.invoiceId === null && c.coveredBy === null && Date.parse(c.startAt) < end)
+    .sort((a, b) => a.startAt.localeCompare(b.startAt) || a.classId.localeCompare(b.classId));
+}
+
+/** Which of an account's charges is the first eligible class (earliest), paid by the first-class payment. */
+export function firstClassOf<C extends Pick<ChargeLike, "classId" | "startAt">>(charges: readonly C[]): C | null {
+  return [...charges].sort((a, b) => a.startAt.localeCompare(b.startAt) || a.classId.localeCompare(b.classId))[0] ?? null;
 }
 
 export const INVOICE_STATUSES = ["issued", "void"] as const;
@@ -378,6 +418,7 @@ export type InvoiceAdjustmentKind = (typeof INVOICE_ADJUSTMENT_KINDS)[number];
 export const INVOICE_ADJUSTMENT_LABELS: Record<InvoiceAdjustmentKind, string> = {
   credit_note: "Credit note (reduces the amount due)",
   debit_note: "Debit note (increases the amount due)",
+  // Previous monthly model only (kept so its history still reads correctly).
   advance_applied: "Enrolment advance applied",
 };
 
@@ -414,12 +455,32 @@ export function summarizeInvoice(input: {
   return { amountDueMinor: input.amountDueMinor, creditsMinor, debitsMinor, totalDueMinor, paidMinor, pendingMinor, balanceMinor, state: balanceMinor <= 0 ? "paid" : paidMinor > 0 ? "partial" : "unpaid" };
 }
 
-// --- Suspension (reversible) ---------------------------------------------------------------------------
+// --- Due states and suspension (reversible) --------------------------------------------------------------
+
+/** not_due ≤ dueAt < grace ≤ deadlineAt < overdue. Cycle invoices have no grace (dueAt = deadlineAt). */
+export function invoiceDueState(input: { dueAt: string; deadlineAt: string }, nowMs: number): DueState {
+  if (nowMs <= Date.parse(input.dueAt)) return "not_due";
+  if (nowMs <= Date.parse(input.deadlineAt)) return "grace";
+  return "overdue";
+}
 
 /** Suspend while any issued invoice is unpaid after its payment deadline. */
-export function shouldSuspend(invoices: readonly { status: InvoiceStatus; period: string; balanceMinor: number }[], nowMs: number): boolean {
-  return invoices.some((i) => i.status === "issued" && i.balanceMinor > 0 && dueState(i.period, nowMs) === "overdue");
+export function shouldSuspend(invoices: readonly { status: InvoiceStatus; dueAt: string; deadlineAt: string; balanceMinor: number }[], nowMs: number): boolean {
+  return invoices.some((i) => i.status === "issued" && i.balanceMinor > 0 && invoiceDueState(i, nowMs) === "overdue");
 }
+
+/** Why a batch student may not join the next class, or null. Checked on the server before any Meet link is returned. */
+export function batchClassBlock(account: { mode: BillingMode; status: string; advance: Pick<AdvanceState, "status">; suspension: { active: boolean } }): "suspended" | "first_class_unpaid" | null {
+  if (account.mode !== "batch") return null;
+  if (account.suspension.active) return "suspended";
+  if (account.advance.status === "awaiting") return "first_class_unpaid";
+  return null;
+}
+
+export const BATCH_BLOCK_MESSAGES: Record<"suspended" | "first_class_unpaid", string> = {
+  suspended: "Access is paused because an invoice is unpaid after its due date. It is restored once the payment is verified.",
+  first_class_unpaid: "The class link opens once your ₹400 first-class payment has been verified.",
+};
 
 // --- Server-calculated amounts ---------------------------------------------------------------------------
 

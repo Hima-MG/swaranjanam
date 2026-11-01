@@ -72,9 +72,7 @@ export function Hero() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <a href={siteConfig.contact.whatsappUrl} target="_blank" rel="noopener noreferrer">
-                Enrol on WhatsApp
-              </a>
+              <Link href="/#courses">Enrol now</Link>
             </Button>
           </div>
         </div>
