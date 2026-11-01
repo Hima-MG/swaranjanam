@@ -2,6 +2,8 @@
 
 import {
   Activity,
+  Boxes,
+  Receipt,
   BarChart3,
   Bell,
   BookOpen,
@@ -38,7 +40,9 @@ export const TEACHER_NAV: TeacherNavItem[] = [
   { href: "/teacher/courses", label: "Courses", icon: BookOpen },
   { href: "/teacher/classes", label: "Classes", icon: CalendarClock },
   { href: "/teacher/students", label: "Students", icon: Users },
-  { href: "/teacher/packages", label: "Packages", icon: Package },
+  { href: "/teacher/batches", label: "Batches", icon: Boxes },
+  { href: "/teacher/billing", label: "Billing", icon: Receipt },
+  { href: "/teacher/packages", label: "Packages (legacy)", icon: Package },
   { href: "/teacher/payments", label: "Payments", icon: IndianRupee },
   { href: "/teacher/pricing", label: "Fees & pricing", icon: Tags },
   { href: "/teacher/submissions", label: "Submissions", icon: Mic },

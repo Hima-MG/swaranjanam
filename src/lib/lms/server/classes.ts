@@ -36,6 +36,9 @@ export function mapLiveClass(snapshot: DocumentSnapshot<DocumentData>): LiveClas
     studentId: String(d.studentId ?? ""),
     packageId: isValidId(d.packageId) ? d.packageId : null,
     sessionKey: isValidId(d.sessionKey) ? d.sessionKey : isValidId(d.packageId) ? snapshot.id : null,
+    batchId: isValidId(d.batchId) ? d.batchId : null,
+    billingAccountId: isValidId(d.billingAccountId) ? d.billingAccountId : null,
+    cancelKind: d.cancelKind === "academy" || d.cancelKind === "student" || d.cancelKind === "rescheduled" ? d.cancelKind : null,
     title: String(d.title ?? "Class"),
     startAt,
     endAt,
@@ -170,7 +173,12 @@ const RECENT_DAYS = 14;
 export async function listOwnClasses(user: SessionUser): Promise<{ classes: StudentClassView[]; nowMs: number }> {
   const nowMs = Date.now();
   if (user.role !== "student") return { classes: [], nowMs };
-  const snapshot = await col("liveClasses").where("studentId", "==", user.uid).get();
+  const [snapshot, accountsSnap] = await Promise.all([
+    col("liveClasses").where("studentId", "==", user.uid).get(),
+    col("billingAccounts").where("studentId", "==", user.uid).get(),
+  ]);
+  // Suspended for unpaid fees past the deadline: no Meet links (reversible).
+  const suspendedAccounts = new Set(accountsSnap.docs.filter((d) => d.get("suspension.active") === true).map((d) => d.id));
   const cutoff = nowMs - RECENT_DAYS * 24 * 60 * 60 * 1000;
   const records = snapshot.docs
     .map(mapLiveClass)
@@ -182,7 +190,12 @@ export async function listOwnClasses(user: SessionUser): Promise<{ classes: Stud
   const teacherName = new Map(teachers.map((d) => [d.id, str(d.get("displayName"))]));
 
   const classes = records
-    .map((c) => toStudentView(c, (c.createdBy && teacherName.get(c.createdBy)) || "Swaraanjanam Academy", nowMs))
+    .map((c) => {
+      const view = toStudentView(c, (c.createdBy && teacherName.get(c.createdBy)) || "Swaraanjanam Academy", nowMs);
+      return c.billingAccountId && suspendedAccounts.has(c.billingAccountId)
+        ? { ...view, meetUrl: null, blockedReason: "Access is paused because an invoice is unpaid after its payment deadline. It is restored once the payment is verified." }
+        : view;
+    })
     .sort((a, b) => {
       // Not-yet-ended first (soonest first), then past ones (most recent first).
       const aPast = Date.parse(a.endAt) < nowMs;

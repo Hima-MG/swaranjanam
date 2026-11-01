@@ -13,11 +13,13 @@ import { Spinner } from "@/components/ui/loading-state";
 import { Modal } from "@/components/ui/modal";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { ADVANCE_CORRECTION_LABELS, ADVANCE_CORRECTION_REASONS, ADVANCE_POLICY_TEXT } from "@/lib/lms/class-billing";
 import {
   PAYMENT_METHOD_LABELS,
   PAYMENT_METHODS,
   PAYMENT_TRANSITIONS,
   type PaymentMethod,
+  type PaymentRecord,
   type PaymentStatus,
 } from "@/lib/lms/types";
 
@@ -55,14 +57,17 @@ function VerifiedCheckbox({ id, error }: { id: string; error?: string }) {
 export function RecordPaymentDialog({
   enrollmentOptions,
   packageOptions = [],
+  billingOptions = [],
   methods = [...PAYMENT_METHODS],
   defaultTarget,
   triggerLabel = "Record payment",
 }: {
   /** Legacy enrollment fees. */
   enrollmentOptions: { id: string; label: string }[];
-  /** Packages (preferred for new billing). */
+  /** Packages (legacy prepaid billing). */
   packageOptions?: { id: string; label: string }[];
+  /** Class-based billing: values "advance:<accountId>" or "invoice:<invoiceId>". */
+  billingOptions?: { value: string; label: string }[];
   /** The academy's accepted methods (teacher settings). */
   methods?: PaymentMethod[];
   /** "package:<id>" or "enrollment:<id>". */
@@ -72,7 +77,7 @@ export function RecordPaymentDialog({
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<PaymentStatus>("paid");
   const { pending, error, fieldErrors: e, run, reset } = useServerAction();
-  const empty = enrollmentOptions.length === 0 && packageOptions.length === 0;
+  const empty = enrollmentOptions.length === 0 && packageOptions.length === 0 && billingOptions.length === 0;
 
   return (
     <Modal
@@ -106,6 +111,8 @@ export function RecordPaymentDialog({
               recordPayment({
                 packageId: kind === "package" ? id : undefined,
                 enrollmentId: kind === "enrollment" ? id : undefined,
+                advanceAccountId: kind === "advance" ? id : undefined,
+                invoiceId: kind === "invoice" ? id : undefined,
                 amount: data.get("amount"),
                 method: data.get("method"),
                 reference: data.get("reference"),
@@ -121,9 +128,18 @@ export function RecordPaymentDialog({
         }}
       >
         <fieldset disabled={pending} className="flex flex-col gap-4">
-          <Field id="pay-target" label="Package or course fee" error={e.target}>
+          <Field id="pay-target" label="What is this payment for?" error={e.target}>
             <NativeSelect id="pay-target" name="target" defaultValue={defaultTarget ?? ""} required>
               <option value="">Choose…</option>
+              {billingOptions.length > 0 && (
+                <optgroup label="Class billing (advance / invoices)">
+                  {billingOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               {packageOptions.length > 0 && (
                 <optgroup label="Packages">
                   {packageOptions.map((o) => (
@@ -208,11 +224,24 @@ const TRANSITION_LABELS: Record<PaymentStatus, string> = {
   refunded: "Record full refund",
 };
 
-export function PaymentStatusActions({ paymentId, status, source }: { paymentId: string; status: PaymentStatus; source: "manual" | "gateway" }) {
+export function PaymentStatusActions({
+  paymentId,
+  status,
+  source,
+  purpose = null,
+}: {
+  paymentId: string;
+  status: PaymentStatus;
+  source: "manual" | "gateway";
+  purpose?: PaymentRecord["purpose"];
+}) {
   const [target, setTarget] = useState<PaymentStatus | null>(null);
   const { pending, error, fieldErrors, run, reset } = useServerAction();
   const options = source === "gateway" ? [] : PAYMENT_TRANSITIONS[status];
   if (options.length === 0) return null;
+  // The enrolment advance is non-refundable: "refunded" only reverses a payment recorded in error.
+  const advanceCorrection = purpose === "advance";
+  const label = (option: PaymentStatus) => (advanceCorrection && option === "refunded" ? "Reverse (payment error)" : TRANSITION_LABELS[option]);
 
   return (
     <>
@@ -229,7 +258,7 @@ export function PaymentStatusActions({ paymentId, status, source }: { paymentId:
               setTarget(option);
             }}
           >
-            {TRANSITION_LABELS[option]}
+            {label(option)}
           </Button>
         ))}
       </div>
@@ -239,22 +268,40 @@ export function PaymentStatusActions({ paymentId, status, source }: { paymentId:
           if (!next && !pending) setTarget(null);
         }}
         className="sm:max-w-md"
-        title={target ? `${TRANSITION_LABELS[target]}?` : ""}
-        description="The change is recorded in the payment’s history with your name and the time."
+        title={target ? `${label(target)}?` : ""}
+        description={
+          advanceCorrection && target === "refunded"
+            ? `${ADVANCE_POLICY_TEXT} Use this only to correct a payment mistake; the advance becomes owed again.`
+            : "The change is recorded in the payment’s history with your name and the time."
+        }
       >
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
-            run(() => updatePaymentStatus(paymentId, target, data.get("note"), data.get("verifiedConfirmation") === "on"), {
+            run(() => updatePaymentStatus(paymentId, target, data.get("note"), data.get("verifiedConfirmation") === "on", data.get("correctionReason")), {
               onSuccess: () => setTarget(null),
             });
           }}
         >
+          {advanceCorrection && target === "refunded" && (
+            <Field id={`correction-${paymentId}`} label="Payment mistake being corrected" error={fieldErrors.correctionReason}>
+              <NativeSelect id={`correction-${paymentId}`} name="correctionReason" required defaultValue="">
+                <option value="" disabled>
+                  Choose…
+                </option>
+                {ADVANCE_CORRECTION_REASONS.map((r) => (
+                  <option key={r} value={r}>
+                    {ADVANCE_CORRECTION_LABELS[r]}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+          )}
           <Field
             id={`note-${paymentId}`}
-            label={target === "refunded" ? "Refund note (required)" : target === "failed" ? "Reason for rejecting (required)" : "Note (optional)"}
+            label={target === "refunded" ? (advanceCorrection ? "What happened (required)" : "Refund note (required)") : target === "failed" ? "Reason for rejecting (required)" : "Note (optional)"}
             error={fieldErrors.note}
           >
             <Input id={`note-${paymentId}`} name="note" maxLength={300} required={target === "refunded" || target === "failed"} />

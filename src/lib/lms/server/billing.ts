@@ -536,6 +536,8 @@ export async function readReceiptContext(
   tx: Transaction,
   payment: Pick<PaymentRecord, "id" | "studentId" | "courseId">,
   pkg: PackageRecord | null,
+  /** Class-based billing: what the payment was for, e.g. "Swara Foundation — invoice for November 2026". */
+  titleSuffix?: string,
 ): Promise<ReceiptContext> {
   const receiptRef = col("receipts").doc(payment.id);
   const counterRef = receiptCounterRef();
@@ -553,6 +555,7 @@ export async function readReceiptContext(
     ]);
     learnerNames = [str(student.get("displayName")) ?? str(student.get("email")) ?? "Student"];
     title = str(course?.get("title")) ?? "Course fee";
+    if (titleSuffix) title = `${title} — ${titleSuffix}`;
   }
   const next = counterSnap.get("next");
   return {

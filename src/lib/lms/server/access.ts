@@ -73,16 +73,32 @@ export async function getActiveEnrollment(studentId: string, courseId: string): 
 }
 
 /**
+ * Whether the student's class billing for this course is suspended (an invoice
+ * unpaid after its payment deadline). Reversible: lifted after verified payment.
+ * Reads the deterministic account ids directly (ba_{student}_{course}_{mode}).
+ */
+export async function isBillingSuspended(studentId: string, courseId: string): Promise<boolean> {
+  const snaps = await col("billingAccounts").firestore.getAll(
+    col("billingAccounts").doc(`ba_${studentId}_${courseId}_batch`),
+    col("billingAccounts").doc(`ba_${studentId}_${courseId}_individual`),
+  );
+  return snaps.some((s) => s.exists && s.get("suspension.active") === true);
+}
+
+/**
  * Student access to a course's content: active enrollment AND a published
- * (or archived) course. Returns null otherwise; it never reveals which check failed.
+ * (or archived) course AND no billing suspension for that course. Returns null
+ * otherwise; it never reveals which check failed. Nothing is deleted when access
+ * is suspended: enrolment, progress and history stay intact.
  */
 export async function getStudentCourseAccess(user: SessionUser, courseId: string) {
   if (user.role !== "student" || !isValidId(courseId)) return null;
-  const [course, enrollment] = await Promise.all([
+  const [course, enrollment, suspended] = await Promise.all([
     readCourse(courseId),
     getActiveEnrollment(user.uid, courseId),
+    isBillingSuspended(user.uid, courseId),
   ]);
-  if (!course || !enrollment || !isOpenToEnrolledStudents(course.status)) return null;
+  if (!course || !enrollment || suspended || !isOpenToEnrolledStudents(course.status)) return null;
   return { course, enrollment };
 }
 

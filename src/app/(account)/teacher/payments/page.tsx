@@ -15,7 +15,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
-import { getBillingSettings, getRevenueReport, listPayablePackages } from "@/lib/lms/server/billing";
+import { getBillingSettings, getRevenueReport } from "@/lib/lms/server/billing";
 import { listPayments, parsePaymentFilters, type PaymentFilters } from "@/lib/lms/server/payments";
 import { cn } from "@/lib/utils";
 import { PAYMENT_METHOD_LABELS } from "@/lib/lms/types";
@@ -42,9 +42,8 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const filters = parsePaymentFilters(params);
   const period = params.period === "week" ? "week" : "month";
-  const [result, packageOptions, settings, revenue] = await Promise.all([
+  const [result, settings, revenue] = await Promise.all([
     listPayments(teacher, filters),
-    listPayablePackages(teacher),
     getBillingSettings(),
     getRevenueReport(teacher, period),
   ]);
@@ -54,7 +53,7 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <RecordPaymentDialog enrollmentOptions={result.enrollmentOptions} packageOptions={packageOptions} methods={settings.methods} />
+        <RecordPaymentDialog enrollmentOptions={result.enrollmentOptions} packageOptions={[]} methods={settings.methods} />
         {result.total > 0 && (
           <Button asChild variant="outline" size="sm">
             <a href={`/api/teacher/payments/export${queryString(filters, { page: 1 })}`} download>
@@ -64,9 +63,9 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
           </Button>
         )}
       </div>
-      {result.enrollmentOptions.length === 0 && packageOptions.length === 0 && (
-        <p className="text-sm text-muted-foreground">Payments are recorded against a package or a course enrollment. Assign a package first.</p>
-      )}
+      <p className="text-sm text-muted-foreground">
+        Monthly invoices, the enrolment advance and individual sessions are paid from each student&apos;s billing account (Billing). Legacy packages are read-only.
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -195,7 +194,7 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
                           </details>
                         )}
                       </td>
-                      <td className="px-4 py-3"><PaymentStatusActions paymentId={p.id} status={p.status} source={p.source} /></td>
+                      <td className="px-4 py-3"><PaymentStatusActions paymentId={p.id} status={p.status} source={p.source} purpose={p.purpose} /></td>
                     </tr>
                   ))}
                 </tbody>

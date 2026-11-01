@@ -34,6 +34,12 @@ export function getClientAuth(): Promise<Auth> {
   authPromise ??= (async () => {
     const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
     const auth = getAuth(app);
+    // Local testing only (npm run dev:emulator): never set in production.
+    const emulatorHost = process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST;
+    if (emulatorHost) {
+      const { connectAuthEmulator } = await import("firebase/auth");
+      connectAuthEmulator(auth, `http://${emulatorHost}`, { disableWarnings: true });
+    }
     await setPersistence(auth, inMemoryPersistence);
     return auth;
   })();

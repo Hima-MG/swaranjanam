@@ -12,6 +12,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { NativeSelect } from "@/components/ui/native-select";
 import { requireRole } from "@/lib/auth/session";
 import { listSchedulablePackages } from "@/lib/lms/server/billing";
+import { listIndividualAccounts } from "@/lib/lms/server/class-billing";
 import { listClassesForTeacher, parseClassFilters, type ClassFilters, type ClassTab } from "@/lib/lms/server/classes";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +38,11 @@ function href(filters: ClassFilters, overrides: Partial<ClassFilters>) {
 async function Classes({ searchParams }: { searchParams: SearchParams }) {
   const teacher = await requireRole("teacher", "/teacher/classes");
   const filters = parseClassFilters(await searchParams);
-  const [{ rows, counts, students }, packages] = await Promise.all([listClassesForTeacher(teacher, filters), listSchedulablePackages(teacher)]);
+  const [{ rows, counts, students }, packages, individualAccounts] = await Promise.all([
+    listClassesForTeacher(teacher, filters),
+    listSchedulablePackages(teacher),
+    listIndividualAccounts(teacher),
+  ]);
   const filtered = Boolean(filters.student || filters.from || filters.to);
 
   return (
@@ -58,7 +63,7 @@ async function Classes({ searchParams }: { searchParams: SearchParams }) {
             </Link>
           ))}
         </nav>
-        <ClassFormDialog students={students} packages={packages} />
+        <ClassFormDialog students={students} individualAccounts={individualAccounts} />
       </div>
       {students.length === 0 && (
         <p className="text-sm text-muted-foreground">No students have registered yet. Classes can be scheduled once a student creates an account.</p>

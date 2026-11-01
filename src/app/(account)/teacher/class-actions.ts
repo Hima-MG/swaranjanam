@@ -12,7 +12,22 @@ import {
 } from "@/lib/lms/billing";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
+import { legacyPackageBlock } from "@/lib/lms/legacy-packages";
 import { historyEntry, mapPackage } from "@/lib/lms/server/billing";
+import { periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
+import {
+  applyClassCharge,
+  applySessionCancel,
+  classBillingConfigRef,
+  mapAccount,
+  mapConfig,
+  prepareClassCharge,
+  prepareSessionCancel,
+  readSessionCharge,
+  writeSessionCharge,
+  type ChargePlan,
+  type SessionCancelPlan,
+} from "@/lib/lms/server/class-billing";
 import { mapLiveClass } from "@/lib/lms/server/classes";
 import { col, db } from "@/lib/lms/server/db";
 import { assertStudent } from "@/lib/lms/server/students";
@@ -54,6 +69,8 @@ export interface ClassInput {
   notes: unknown;
   /** Optional: the package whose credits this class uses. */
   packageId?: unknown;
+  /** Optional: the learner's INDIVIDUAL billing account (class-based billing). Not combinable with a package. */
+  billingAccountId?: unknown;
 }
 
 function parseCommon(input: ClassInput) {
@@ -66,13 +83,16 @@ function parseCommon(input: ClassInput) {
   return { title, meetUrl, notes, errors };
 }
 
-/** All class records of one session (pair sessions have one per learner). */
+/** All class records of one session (pair and batch sessions have one per learner). */
 async function sessionSiblings(tx: Transaction, record: LiveClassRecord) {
-  if (!record.packageId || !record.sessionKey) return [{ ref: col("liveClasses").doc(record.id), record }];
+  if ((!record.packageId && !record.batchId) || !record.sessionKey) return [{ ref: col("liveClasses").doc(record.id), record }];
   const snap = await tx.get(col("liveClasses").where("sessionKey", "==", record.sessionKey));
   return snap.docs
     .map((d) => ({ ref: d.ref as DocumentReference, record: mapLiveClass(d) }))
-    .filter((s): s is { ref: DocumentReference; record: LiveClassRecord } => s.record !== null && s.record.packageId === record.packageId);
+    .filter(
+      (s): s is { ref: DocumentReference; record: LiveClassRecord } =>
+        s.record !== null && s.record.packageId === record.packageId && s.record.batchId === record.batchId,
+    );
 }
 
 export async function scheduleClass(input: ClassInput): Promise<ActionResult<{ classId: string }>> {
@@ -114,7 +134,23 @@ export async function scheduleClass(input: ClassInput): Promise<ActionResult<{ c
     if (input?.packageId === undefined || input?.packageId === null || input?.packageId === "") {
       const student = await assertStudent(input?.studentId);
       const ref = col("liveClasses").doc();
-      await ref.create({ ...base, studentId: student.uid, packageId: null, sessionKey: null });
+      if (input?.billingAccountId) {
+        // Individual session: the class and its per-session charge are created together.
+        if (!isValidId(input.billingAccountId)) throw new AccessError("Please fix the highlighted fields.", { billingAccountId: "Choose an account." });
+        const accountId = input.billingAccountId;
+        await db().runTransaction(async (tx) => {
+          const [accountSnap, configSnap] = await Promise.all([tx.get(col("billingAccounts").doc(accountId)), tx.get(classBillingConfigRef())]);
+          const account = mapAccount(accountSnap);
+          if (!account || account.mode !== "individual" || account.status !== "active" || account.studentId !== student.uid) {
+            throw new AccessError("Please fix the highlighted fields.", { billingAccountId: "Choose this student's active individual billing account." });
+          }
+          const version = rateVersionForPeriod(mapConfig(configSnap).rateVersions, periodOf(times.start.toISOString()));
+          tx.create(ref, { ...base, studentId: student.uid, packageId: null, sessionKey: null, batchId: null, billingAccountId: account.id, cancelKind: null });
+          writeSessionCharge(tx, { classId: ref.id, account, title: common.title, date: times.date, startTime: times.startTime, startAt: times.start, version, actor: user });
+        });
+      } else {
+        await ref.create({ ...base, studentId: student.uid, packageId: null, sessionKey: null, batchId: null, billingAccountId: null, cancelKind: null });
+      }
       await writeAudit(user, {
         action: "class.schedule",
         targetType: "student",
@@ -125,8 +161,11 @@ export async function scheduleClass(input: ClassInput): Promise<ActionResult<{ c
       return { classId: ref.id };
     }
 
-    // --- Class using a package credit ---
+    // --- Class using a package credit (legacy packages are read-only) ---
+    const packageBlocked = legacyPackageBlock("schedule_class");
+    if (packageBlocked) throw new AccessError(packageBlocked, { packageId: packageBlocked });
     if (!isValidId(input.packageId)) throw new AccessError("Please fix the highlighted fields.", { packageId: "Choose a package from the list." });
+    if (input?.billingAccountId) throw new AccessError("A class is billed through a package OR a billing account, never both.");
     const packageId = input.packageId;
     const pkgRef = col("packages").doc(packageId);
     const first = mapPackage(await pkgRef.get());
@@ -190,8 +229,10 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
     const times = parseClassTimes(input, Date.now(), timeUnchanged);
     const errors = { ...common.errors, ...(times.ok ? {} : times.errors) };
     if (Object.keys(errors).length || !times.ok) throw new AccessError("Please fix the highlighted fields.", errors);
-    if (existing.packageId && input?.studentId !== existing.studentId) {
-      throw new AccessError("Please fix the highlighted fields.", { studentId: "A package class stays with the package's learners." });
+    if ((existing.packageId || existing.batchId || existing.billingAccountId) && input?.studentId !== existing.studentId) {
+      throw new AccessError("Please fix the highlighted fields.", {
+        studentId: existing.batchId ? "A batch class stays with its learner; manage members on the batch page." : "A package class stays with the package's learners.",
+      });
     }
     const student = input?.studentId === existing.studentId ? { uid: existing.studentId, label: existing.studentId } : await assertStudent(input?.studentId);
 
@@ -201,6 +242,7 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
       const fresh = mapLiveClass(await tx.get(ref));
       if (!fresh || fresh.status !== "scheduled") throw new AccessError("This class changed. Please reload the page.");
       const siblings = (await sessionSiblings(tx, fresh)).filter((s) => s.record.status === "scheduled");
+      const sessionCharge = fresh.billingAccountId && !fresh.batchId ? await readSessionCharge(tx, fresh.id) : null;
       const rescheduled = fresh.date !== times.date || fresh.startTime !== times.startTime || fresh.endTime !== times.endTime;
       const reassigned = student.uid !== fresh.studentId;
       const changes = [
@@ -223,6 +265,16 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
           ? { history: FieldValue.arrayUnion(...changes.map((change) => ({ at: Timestamp.now(), by: user.uid, change }))) }
           : {}),
       };
+      if (sessionCharge?.charge && (rescheduled || common.title !== fresh.title)) {
+        // Same charge document: rescheduling never creates a second charge.
+        tx.update(sessionCharge.ref, {
+          date: times.date,
+          startTime: times.startTime,
+          startAt: Timestamp.fromDate(times.start),
+          title: common.title,
+          history: FieldValue.arrayUnion({ at: Timestamp.now(), by: user.uid, byEmail: user.email, change: `Moved to ${times.date} ${times.startTime} IST` }),
+        });
+      }
       for (const s of siblings) {
         tx.update(s.ref, s.ref.id === ref.id ? { ...shared, studentId: student.uid } : shared);
       }
@@ -241,24 +293,50 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
   });
 }
 
-/** Cancellation by the academy. No credit is consumed; a pair session is cancelled for both learners. */
-export async function cancelClass(classId: unknown, reasonInput: unknown): Promise<ActionResult> {
+const CANCEL_KINDS = ["academy", "student", "rescheduled"] as const;
+const CANCEL_OUTCOME = { academy: "academy_cancelled", student: "student_cancelled", rescheduled: "rescheduled" } as const;
+
+/**
+ * Cancels a class and records why.
+ *  * academy / rescheduled: the whole session (both pair learners, every batch learner).
+ *  * student: only that learner's class.
+ * Package credits are never consumed. Class-based billing follows the billing
+ * policy (by default nothing is billed until the academy confirms the rule).
+ */
+export async function cancelClass(classId: unknown, reasonInput: unknown, kindInput: unknown = "academy"): Promise<ActionResult> {
   return runAction("cancelClass", async () => {
     const user = await requireActionUser("teacher");
     if (!isValidId(classId)) throw new AccessError("That class could not be found.");
+    if (!(CANCEL_KINDS as readonly unknown[]).includes(kindInput)) throw new AccessError("Choose who cancelled the class.");
+    const kind = kindInput as (typeof CANCEL_KINDS)[number];
     const reason = cleanText(reasonInput, 300) || null;
     const ref = col("liveClasses").doc(classId);
+    const nowIso = new Date().toISOString();
+    const nowMs = Date.parse(nowIso);
     const title = await db().runTransaction(async (tx) => {
+      // ---- reads ----
       const existing = mapLiveClass(await tx.get(ref));
       if (!existing) throw new AccessError("That class could not be found.");
       if (existing.status !== "scheduled") throw new AccessError(`A ${existing.status} class cannot be cancelled.`);
-      const siblings = (await sessionSiblings(tx, existing)).filter((s) => s.record.status === "scheduled");
-      for (const s of siblings) {
-        tx.update(s.ref, {
+      const targets =
+        kind === "student" ? [{ ref, record: existing }] : (await sessionSiblings(tx, existing)).filter((s) => s.record.status === "scheduled");
+      const plans: ChargePlan[] = [];
+      const sessionPlans: SessionCancelPlan[] = [];
+      for (const t of targets) {
+        plans.push(await prepareClassCharge(tx, t.record, CANCEL_OUTCOME[kind], nowIso));
+        // Individual session: ≥ 24 h before the start → no charge; < 24 h by the student → still payable.
+        sessionPlans.push(t.record.batchId ? { kind: "none" } : await prepareSessionCancel(tx, t.record, kind, nowMs));
+      }
+
+      // ---- writes ----
+      const label = kind === "academy" ? "by the academy" : kind === "student" ? "by the student" : "for rescheduling";
+      for (const t of targets) {
+        tx.update(t.ref, {
           status: "cancelled",
+          cancelKind: kind,
           cancelledAt: FieldValue.serverTimestamp(),
           cancelledBy: user.uid,
-          cancelledByAcademy: true,
+          cancelledByAcademy: kind !== "student",
           cancelReason: reason,
           updatedBy: user.uid,
           updatedByEmail: user.email,
@@ -266,23 +344,37 @@ export async function cancelClass(classId: unknown, reasonInput: unknown): Promi
           history: FieldValue.arrayUnion({
             at: Timestamp.now(),
             by: user.uid,
-            change: `Cancelled by the academy${reason ? `: ${reason}` : ""}${existing.packageId ? " (no class credit used; carries forward)" : ""}`,
+            change: `Cancelled ${label}${reason ? `: ${reason}` : ""}${existing.packageId ? " (no class credit used; carries forward)" : ""}`,
           }),
         });
+      }
+      let billed = 0;
+      for (const plan of plans) {
+        if (plan.kind === "charge") billed += 1;
+        applyClassCharge(tx, plan, user);
+      }
+      let sessionFee: "no_charge" | "payable" | null = null;
+      for (const plan of sessionPlans) {
+        if (plan.kind === "update") sessionFee = plan.decision;
+        applySessionCancel(tx, plan, user);
       }
       return {
         title: existing.title,
         studentId: existing.studentId,
         when: formatClassTime(existing.startAt, existing.endAt),
-        learners: siblings.length,
+        learners: targets.length,
         packageId: existing.packageId,
+        batchId: existing.batchId,
+        label,
+        billed,
+        sessionFee,
       };
     });
     await writeAudit(user, {
       action: "class.cancel",
-      targetType: title.packageId ? "package" : "student",
-      targetId: title.packageId ?? title.studentId,
-      summary: `Cancelled "${title.title}" (${title.when})${title.learners > 1 ? ` for ${title.learners} learners` : ""}${reason ? ` — ${reason}` : ""}`,
+      targetType: title.batchId ? "batch" : title.packageId ? "package" : "student",
+      targetId: title.batchId ?? title.packageId ?? title.studentId,
+      summary: `Cancelled ${title.label} "${title.title}" (${title.when})${title.learners > 1 ? ` for ${title.learners} learners` : ""}${reason ? ` — ${reason}` : ""}${title.billed ? ` — billed for ${title.billed} learner(s) under the billing policy` : ""}${title.sessionFee === "payable" ? " — individual session fee remains payable (less than 24 hours' notice)" : title.sessionFee === "no_charge" ? " — individual session: no charge" : ""}`,
     });
     refresh();
     return null;
@@ -324,6 +416,8 @@ export async function recordClassOutcome(classId: unknown, attendanceInput: unkn
       if (!credit.ok) throw new AccessError(credit.error, { attendance: credit.error });
       const pkg = pkgSnap ? mapPackage(pkgSnap) : null;
       if (existing.packageId && !pkg) throw new AccessError("The package for this class could not be found.");
+      // Class-based billing (batch / individual accounts): at most one charge per class, ever.
+      const charge = await prepareClassCharge(tx, existing, attendance, new Date().toISOString());
 
       // ---- writes ----
       tx.update(ref, {
@@ -361,7 +455,15 @@ export async function recordClassOutcome(classId: unknown, attendanceInput: unkn
           ),
         });
       }
-      return { title: existing.title, studentId: existing.studentId, consumed: credit.consume, creditsRemaining, packageId: existing.packageId };
+      applyClassCharge(tx, charge, user);
+      return {
+        title: existing.title,
+        studentId: existing.studentId,
+        consumed: credit.consume,
+        creditsRemaining,
+        packageId: existing.packageId,
+        chargeKind: charge.kind,
+      };
     });
     await writeAudit(user, {
       action: "class.outcome",
@@ -369,7 +471,7 @@ export async function recordClassOutcome(classId: unknown, attendanceInput: unkn
       targetId: info.studentId,
       summary: `Recorded "${info.title}" as completed (attendance: ${attendance})${
         info.packageId ? (info.consumed ? ` — 1 package credit used, ${info.creditsRemaining} left` : " — credit already counted for this session") : ""
-      }`,
+      }${info.chargeKind === "charge" ? " — charged to this month's batch billing" : info.chargeKind === "already" ? " — already charged" : ""}`,
     });
     refresh();
     return null;

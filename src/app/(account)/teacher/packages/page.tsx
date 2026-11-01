@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { CreditsMeter, nextPaymentText, PackageStatusBadge, PaymentStateBadge } from "@/components/lms/billing-display";
-import { AssignPackageDialog } from "@/components/lms/teacher/package-controls";
 import { StatCard } from "@/components/lms/teacher/stat-card";
 import { TeacherPageHeader } from "@/components/lms/teacher/teacher-page-header";
 import { Button } from "@/components/ui/button";
@@ -16,8 +15,8 @@ import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate } from "@/lib/format-date";
 import { PACKAGE_STATUS_LABELS, PACKAGE_STATUSES, PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
+import { LEGACY_PACKAGES_MESSAGE } from "@/lib/lms/legacy-packages";
 import { listPackagesForTeacher, parsePackageFilters } from "@/lib/lms/server/billing";
-import { listStudentOptions } from "@/lib/lms/server/classes";
 
 export const metadata: Metadata = { title: "Packages · Teacher" };
 
@@ -26,19 +25,13 @@ type SearchParams = PageProps<"/teacher/packages">["searchParams"];
 async function Packages({ searchParams }: { searchParams: SearchParams }) {
   const teacher = await requireRole("teacher", "/teacher/packages");
   const filters = parsePackageFilters(await searchParams);
-  const [{ rows, plans, totals }, students] = await Promise.all([listPackagesForTeacher(teacher, filters), listStudentOptions(teacher)]);
+  const { rows, plans, totals } = await listPackagesForTeacher(teacher, filters);
   const filtered = Boolean(filters.status !== "any" || filters.plan || filters.q);
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {plans.length === 0 ? (
-          <Button asChild size="sm">
-            <Link href="/teacher/pricing">Set up fee plans first</Link>
-          </Button>
-        ) : (
-          <AssignPackageDialog plans={plans} students={students} />
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">{LEGACY_PACKAGES_MESSAGE}</p>
         <Button asChild variant="outline" size="sm">
           <a href="/api/teacher/packages/export" download>
             <Download data-icon="inline-start" />

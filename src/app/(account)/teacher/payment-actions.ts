@@ -6,6 +6,8 @@ import { refresh } from "next/cache";
 import { paiseToRupeesText, statusAfterPayment, summarizePackage } from "@/lib/lms/billing";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
+import { ADVANCE_CORRECTION_LABELS, type AdvanceCorrectionReason, advanceReversalError } from "@/lib/lms/class-billing";
+import { legacyPackageBlock } from "@/lib/lms/legacy-packages";
 import {
   getBillingSettings,
   historyEntry,
@@ -15,6 +17,7 @@ import {
   writeReceipt,
   type PackageRecord,
 } from "@/lib/lms/server/billing";
+import { applyVerifiedPayment, evaluateSuspension, readPaymentTarget, type PaymentTarget, type TargetState } from "@/lib/lms/server/class-billing";
 import { col, db, mapEnrollment } from "@/lib/lms/server/db";
 import { mapPayment } from "@/lib/lms/server/payments";
 import {
@@ -46,8 +49,14 @@ const rupees = (minor: number) => `₹${paiseToRupeesText(minor)}`;
 export interface RecordPaymentInput {
   /** Legacy enrollment fee payment. */
   enrollmentId?: unknown;
-  /** Package payment. Exactly one of enrollmentId / packageId. */
+  /** Package payment. */
   packageId?: unknown;
+  /** Class-based billing: the one-time registration advance of this billing account. */
+  advanceAccountId?: unknown;
+  /** Class-based billing: a monthly batch invoice. */
+  invoiceId?: unknown;
+  /** Class-based billing: one individual session (₹750, paid separately). Exactly one target in total. */
+  sessionChargeId?: unknown;
   amount: unknown;
   method: unknown;
   reference: unknown;
@@ -80,8 +89,21 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
 
     const enrollmentId = isValidId(input?.enrollmentId) ? input.enrollmentId : null;
     const packageId = isValidId(input?.packageId) ? input.packageId : null;
-    if (!enrollmentId && !packageId) errors.target = "Choose the package or enrollment this payment is for.";
-    if (enrollmentId && packageId) errors.target = "Choose either a package or an enrollment, not both.";
+    const advanceAccountId = isValidId(input?.advanceAccountId) ? input.advanceAccountId : null;
+    const invoiceId = isValidId(input?.invoiceId) ? input.invoiceId : null;
+    const sessionChargeId = isValidId(input?.sessionChargeId) ? input.sessionChargeId : null;
+    const targetCount = [enrollmentId, packageId, advanceAccountId, invoiceId, sessionChargeId].filter(Boolean).length;
+    const packageBlocked = packageId ? legacyPackageBlock("record_payment") : null;
+    if (packageBlocked) throw new AccessError(packageBlocked, { target: "Legacy package (read-only)." });
+    if (targetCount === 0) errors.target = "Choose what this payment is for.";
+    if (targetCount > 1) errors.target = "Choose only one target for a payment.";
+    const billingTarget: PaymentTarget | null = advanceAccountId
+      ? { kind: "advance", accountId: advanceAccountId }
+      : invoiceId
+        ? { kind: "invoice", invoiceId }
+        : sessionChargeId
+          ? { kind: "session", chargeId: sessionChargeId }
+          : null;
     const amountMinor = parseAmountMinor(input?.amount);
     if (amountMinor === null) errors.amount = "Enter an amount greater than zero (up to 2 decimal places).";
     const settings = await getBillingSettings();
@@ -118,7 +140,44 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
 
       let target: { studentId: string; courseId: string; enrollmentId: string; learnerIds: string[]; currency: string; label: string };
       let pkgData: Awaited<ReturnType<typeof readPackageInTx>> = null;
-      if (packageId) {
+      let billing: TargetState | null = null;
+      if (billingTarget) {
+        billing = await readPaymentTarget(tx, billingTarget);
+        // The amount owed is calculated on the server; the form cannot change it.
+        if (status !== "failed") {
+          if (billing.payableMinor === null) {
+            throw new AccessError(
+              billingTarget.kind === "advance"
+                ? "No advance is payable on this account (already received, applied or not required)."
+                : billingTarget.kind === "session"
+                  ? "This session is not payable (already paid, or cancelled without charge)."
+                  : "This invoice is not payable (void or already paid).",
+              { target: "Nothing payable." },
+            );
+          }
+          if ((billingTarget.kind === "advance" || billingTarget.kind === "session") && amountMinor !== billing.payableMinor) {
+            throw new AccessError("Please fix the highlighted fields.", {
+              amount: `The ${billingTarget.kind === "advance" ? "advance" : "session fee"} is exactly ₹${paiseToRupeesText(billing.payableMinor)}.`,
+            });
+          }
+          if (billingTarget.kind === "invoice" && amountMinor! > billing.payableMinor) {
+            throw new AccessError("Please fix the highlighted fields.", { amount: `At most ₹${paiseToRupeesText(billing.payableMinor)} is outstanding on this invoice.` });
+          }
+        }
+        target = {
+          studentId: billing.account.studentId,
+          courseId: billing.account.courseId,
+          enrollmentId: "",
+          learnerIds: [billing.account.studentId],
+          currency: "INR",
+          label:
+            billingTarget.kind === "advance"
+              ? `advance for account ${billing.account.id}`
+              : billingTarget.kind === "session"
+                ? `session charge ${billingTarget.chargeId}`
+                : `invoice ${billingTarget.invoiceId}`,
+        };
+      } else if (packageId) {
         pkgData = await readPackageInTx(tx, packageId);
         if (!pkgData) throw new AccessError("That package could not be found.", { target: "Not found." });
         if (pkgData.pkg.status === "cancelled") throw new AccessError("This package is cancelled.", { target: "Cancelled package." });
@@ -149,6 +208,10 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
         courseId: target.courseId,
         enrollmentId: target.enrollmentId,
         packageId,
+        purpose: billingTarget ? billingTarget.kind : null,
+        accountId: billing ? billing.account.id : null,
+        invoiceId: billingTarget?.kind === "invoice" ? billingTarget.invoiceId : null,
+        sessionChargeId: billingTarget?.kind === "session" ? billingTarget.chargeId : null,
         learnerIds: target.learnerIds,
         payerName,
         rejectionReason: status === "failed" ? rejectionReason : null,
@@ -172,9 +235,10 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
         updatedAt: null,
         history: [],
       };
-      const receiptCtx = status === "paid" ? await readReceiptContext(tx, record, pkgData?.pkg ?? null) : null;
+      const receiptCtx = status === "paid" ? await readReceiptContext(tx, record, pkgData?.pkg ?? null, billing?.titleSuffix) : null;
 
       // ---- writes ----
+      if (billing && status === "paid") applyVerifiedPayment(tx, billing, ref.id, user);
       if (reservation) tx.create(reservation, { paymentId: ref.id, method, createdAt: FieldValue.serverTimestamp() });
       const receiptNumber = receiptCtx ? writeReceipt(tx, receiptCtx, record, pkgData?.pkg ?? null) : null;
       tx.create(ref, {
@@ -182,6 +246,10 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
         courseId: record.courseId,
         enrollmentId: record.enrollmentId,
         packageId: record.packageId,
+        purpose: record.purpose,
+        accountId: record.accountId,
+        invoiceId: record.invoiceId,
+        sessionChargeId: record.sessionChargeId,
         learnerIds: record.learnerIds,
         payerName,
         amountMinor: record.amountMinor,
@@ -226,8 +294,10 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
           ),
         });
       }
-      return { label: target.label, receiptNumber };
+      return { label: target.label, receiptNumber, accountId: billing?.account.id ?? null };
     });
+    // A verified invoice payment may lift a suspension (idempotent; the scheduled job re-checks too).
+    if (result.accountId && status === "paid") await evaluateSuspension(result.accountId, user);
     await writeAudit(user, {
       action: "payment.create",
       targetType: "payment",
@@ -242,12 +312,15 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
 /**
  * Verify (pending → paid), reject (pending → failed, reason required), reopen
  * (failed → pending) or refund in full (paid → refunded, note required).
+ * The enrolment advance is non-refundable: an advance payment can only be
+ * reversed to correct a payment mistake (correctionReason required).
  */
 export async function updatePaymentStatus(
   paymentId: unknown,
   nextStatus: unknown,
   noteInput: unknown,
   verifiedConfirmation: unknown,
+  correctionReason?: unknown,
 ): Promise<ActionResult> {
   return runAction("updatePaymentStatus", async () => {
     const user = await requireActionUser("teacher");
@@ -277,6 +350,26 @@ export async function updatePaymentStatus(
         throw new AccessError("Give the reason this payment is rejected.", { note: "Required when rejecting a payment." });
       }
       const pkgData = payment.packageId ? await readPackageInTx(tx, payment.packageId) : null;
+      const billing =
+        payment.purpose === "advance" && payment.accountId
+          ? await readPaymentTarget(tx, { kind: "advance", accountId: payment.accountId })
+          : payment.purpose === "invoice" && payment.invoiceId
+            ? await readPaymentTarget(tx, { kind: "invoice", invoiceId: payment.invoiceId })
+            : payment.purpose === "session" && payment.sessionChargeId
+              ? await readPaymentTarget(tx, { kind: "session", chargeId: payment.sessionChargeId })
+              : null;
+      if (billing && target === "paid" && billing.target.kind === "invoice") {
+        if (billing.payableMinor === null || payment.amountMinor > billing.payableMinor) {
+          throw new AccessError("Verifying this payment would exceed the invoice's outstanding balance. Check the invoice first.");
+        }
+      }
+      const advanceCorrection = billing?.target.kind === "advance" && target === "refunded";
+      if (advanceCorrection) {
+        const appliedMinor = billing.account.advance.paymentId === payment.id ? billing.account.advance.appliedMinor : 0;
+        const blocked = advanceReversalError({ reason: correctionReason, appliedMinor });
+        if (blocked) throw new AccessError(blocked, { correctionReason: blocked });
+      }
+      const correctionLabel = advanceCorrection ? ADVANCE_CORRECTION_LABELS[correctionReason as AdvanceCorrectionReason] : null;
       if (target === "refunded" && pkgData?.adjustments.some((a) => a.kind === "refund" && a.paymentId === payment.id)) {
         throw new AccessError("Part of this payment has already been refunded. Record the rest as a refund adjustment on the package.");
       }
@@ -285,16 +378,51 @@ export async function updatePaymentStatus(
         status: target,
         verified: target === "paid" ? true : target === "refunded" ? payment.verified : false,
       };
-      const receiptCtx = target === "paid" ? await readReceiptContext(tx, updated, pkgData?.pkg ?? null) : null;
+      const receiptCtx = target === "paid" ? await readReceiptContext(tx, updated, pkgData?.pkg ?? null, billing?.titleSuffix) : null;
       const receiptRef = target === "refunded" ? col("receipts").doc(payment.id) : null;
       const receiptSnap = receiptRef ? await tx.get(receiptRef) : null;
 
       // ---- writes ----
-      const change = `${payment.status} → ${target}${note ? ` (${note})` : ""}`;
+      const change = correctionLabel
+        ? `Advance payment reversed — payment error: ${correctionLabel} (${note})`
+        : `${payment.status} → ${target}${note ? ` (${note})` : ""}`;
+      if (billing && target === "paid") applyVerifiedPayment(tx, billing, payment.id, user);
+      if (billing?.session && billing.sessionRef && target === "refunded" && billing.session.paymentId === payment.id) {
+        // Refunded: a payable session becomes due again; a no-charge session's review is resolved.
+        tx.update(billing.sessionRef, {
+          ...(billing.session.status === "paid" ? { status: "due" } : {}),
+          paymentId: null,
+          needsReview: null,
+          history: FieldValue.arrayUnion(historyEntry(user, `Session payment refunded: ${note}`)),
+        });
+      }
+      if (billing && billing.target.kind === "advance" && target === "refunded" && billing.account.advance.paymentId === payment.id) {
+        // The advance is no longer received; the account goes back to awaiting it.
+        tx.update(billing.accountRef, {
+          "advance.status": "awaiting",
+          "advance.paymentId": null,
+          history: FieldValue.arrayUnion(historyEntry(user, `Advance payment reversed (payment error: ${correctionLabel}): ${note}. The advance is owed again.`)),
+        });
+        tx.create(col("advanceLedger").doc(), {
+          accountId: billing.account.id,
+          studentId: billing.account.studentId,
+          kind: "reversed",
+          reason: correctionReason,
+          amountMinor: payment.amountMinor,
+          paymentId: payment.id,
+          at: FieldValue.serverTimestamp(),
+          by: user.uid,
+        });
+      }
       const receiptNumber = receiptCtx ? writeReceipt(tx, receiptCtx, updated, pkgData?.pkg ?? null) : null;
       if (receiptRef && receiptSnap?.exists) {
         // The original receipt is kept for the audit trail and marked refunded.
-        tx.update(receiptRef, { status: "refunded", refundedMinor: payment.amountMinor, statusNote: `Refunded: ${note}`, updatedAt: FieldValue.serverTimestamp() });
+        tx.update(receiptRef, {
+          status: "refunded",
+          refundedMinor: payment.amountMinor,
+          statusNote: correctionLabel ? `Reversed — payment error: ${correctionLabel} (${note})` : `Refunded: ${note}`,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
       }
       tx.update(ref, {
         status: target,
@@ -319,10 +447,11 @@ export async function updatePaymentStatus(
           ),
         });
       }
-      return `Payment ${ref.id}: ${change}${receiptNumber ? ` — receipt ${receiptNumber}` : ""}`;
+      return { text: `Payment ${ref.id}: ${change}${receiptNumber ? ` — receipt ${receiptNumber}` : ""}`, accountId: billing?.account.id ?? null };
     });
+    if (summary.accountId) await evaluateSuspension(summary.accountId, user);
 
-    await writeAudit(user, { action: "payment.status", targetType: "payment", targetId: ref.id, summary });
+    await writeAudit(user, { action: "payment.status", targetType: "payment", targetId: ref.id, summary: summary.text });
     refresh();
     return null;
   });

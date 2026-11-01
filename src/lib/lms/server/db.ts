@@ -52,6 +52,19 @@ export const COLLECTIONS = {
   receipts: "receipts",
   paymentReferences: "paymentReferences",
   settings: "settings",
+  // Batches and class-based billing (see lib/lms/types.ts).
+  batches: "batches",
+  batchMembers: "batchMembers",
+  batchMembershipLocks: "batchMembershipLocks",
+  billingAccounts: "billingAccounts",
+  billableClasses: "billableClasses",
+  invoices: "invoices",
+  invoiceAdjustments: "invoiceAdjustments",
+  sessionCharges: "sessionCharges",
+  advanceLedger: "advanceLedger",
+  legacyDues: "legacyDues",
+  gatewayOrders: "gatewayOrders",
+  gatewayEvents: "gatewayEvents",
 } as const;
 
 export function db() {
