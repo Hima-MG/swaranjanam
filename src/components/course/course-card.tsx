@@ -1,11 +1,12 @@
-import { ArrowRight, BookOpen, Clock } from "lucide-react";
+import { ArrowRight, BookOpen, MonitorPlay } from "lucide-react";
 import Link from "next/link";
 
 import { CourseBadge } from "@/components/course/course-badge";
-import { CoursePrice } from "@/components/course/course-price";
+import { CourseFeeLine } from "@/components/course/course-fees";
 import { CourseThumbnail } from "@/components/course/course-thumbnail";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { Course } from "@/types/course";
+import { COURSE_AVAILABILITY_LABELS, type Course } from "@/types/course";
 
 interface CourseCardProps {
   course: Course;
@@ -24,9 +25,12 @@ export function CourseCard({ course, className }: CourseCardProps) {
     >
       <div className="relative">
         <CourseThumbnail course={course} />
-        {course.tag && (
-          <CourseBadge kind="tag" value={course.tag} className="absolute top-4 left-4" />
-        )}
+        <div className="absolute top-4 left-4 flex flex-wrap gap-2">
+          <Badge variant={course.availability === "open" ? "gold" : "cream"} className="shadow-soft">
+            {COURSE_AVAILABILITY_LABELS[course.availability]}
+          </Badge>
+          {course.tag && <CourseBadge kind="tag" value={course.tag} />}
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-6">
@@ -58,20 +62,22 @@ export function CourseCard({ course, className }: CourseCardProps) {
         )}
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-brown-muted">
-          {course.duration && (
+          {course.availability === "open" && (
             <span className="inline-flex items-center gap-1.5">
-              <Clock className="size-4" aria-hidden="true" />
-              {course.duration}
+              <MonitorPlay className="size-4" aria-hidden="true" />
+              Live online · 1 hour weekly
             </span>
           )}
-          <span className="inline-flex items-center gap-1.5">
-            <BookOpen className="size-4" aria-hidden="true" />
-            {course.lessonCount} {course.lessonCount === 1 ? "lesson" : "lessons"}
-          </span>
+          {course.lessonCount > 0 && (
+            <span className="inline-flex items-center gap-1.5">
+              <BookOpen className="size-4" aria-hidden="true" />
+              {course.lessonCount} {course.lessonCount === 1 ? "lesson" : "lessons"}
+            </span>
+          )}
         </div>
 
         <div className="mt-auto flex items-end justify-between gap-3 border-t border-border pt-4">
-          <CoursePrice fee={course.fee} />
+          <CourseFeeLine fee={course.fee} />
           <span
             aria-hidden="true"
             className="flex size-10 items-center justify-center rounded-full bg-maroon-soft text-maroon transition-colors group-hover:bg-maroon group-hover:text-cream"

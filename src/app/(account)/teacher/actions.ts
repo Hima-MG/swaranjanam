@@ -116,6 +116,7 @@ const EMPTY_CATALOG_FIELDS = {
   featured: false,
   outcomes: [],
   outcomesMl: [],
+  availability: null,
 };
 
 export async function createCourse(input: unknown): Promise<ActionResult<{ courseId: string }>> {

@@ -36,8 +36,8 @@ function HeroArt() {
           <CalendarDays className="size-5" aria-hidden="true" />
         </span>
         <div className="leading-tight">
-          <p className="text-xs text-muted-foreground">New batches</p>
-          <p className="text-sm font-semibold text-brown">Every month</p>
+          <p className="text-xs text-muted-foreground">Live on Google Meet</p>
+          <p className="text-sm font-semibold text-brown">1 hour, weekly</p>
         </div>
       </div>
     </div>
@@ -54,7 +54,7 @@ export function Hero() {
       <Container className="grid items-center gap-14 py-14 sm:py-20 lg:grid-cols-[1.1fr_1fr] lg:gap-20 lg:py-24">
         <div className="flex flex-col items-start gap-7">
           <Badge variant="gold" className="h-7 px-3.5">
-            Admissions open · New batches every month
+            Admissions open · Swara Foundation &amp; Little Swaras
           </Badge>
           <p className="font-heading text-xl text-maroon italic sm:text-2xl">{siteConfig.motto}</p>
           <h1 className="type-display text-brown">
@@ -67,12 +67,14 @@ export function Hero() {
           </p>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
             <Button asChild size="lg">
-              <Link href="/courses">
-                Explore Courses <ArrowRight data-icon="inline-end" />
+              <Link href="/#courses">
+                Courses &amp; fees <ArrowRight data-icon="inline-end" />
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="/contact">Book a Free Trial</Link>
+              <a href={siteConfig.contact.whatsappUrl} target="_blank" rel="noopener noreferrer">
+                Enrol on WhatsApp
+              </a>
             </Button>
           </div>
         </div>

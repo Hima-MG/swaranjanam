@@ -42,7 +42,7 @@ export default function AboutPage() {
         <SectionHeader
           eyebrow="Ways to learn"
           title="Learn the way that suits you"
-          description="Choose the format that fits your schedule — every format follows the same structured syllabus."
+          description="Every class is live and online, and you keep the recording to practise from."
         />
         <div className="grid gap-6 md:grid-cols-3">
           {learningModes.map((mode) => (

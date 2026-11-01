@@ -1,4 +1,4 @@
-import type { CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/types/course";
+import type { CourseAvailability, CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/types/course";
 
 // LMS data model, shared by server and client code. Contains no secrets.
 //
@@ -110,6 +110,8 @@ export interface CourseCatalogFields {
   featured: boolean;
   outcomes: string[];
   outcomesMl: string[];
+  /** Public enrolment status; null = not reviewed, so not listed on the public website. */
+  availability: CourseAvailability | null;
 }
 
 export interface CourseRecord extends CourseCatalogFields {

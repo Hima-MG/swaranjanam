@@ -1,29 +1,29 @@
-import { ArrowRight } from "lucide-react";
-import Link from "next/link";
 import { Suspense } from "react";
 
-import { CourseGrid } from "@/components/course/course-grid";
 import { AboutFounder } from "@/components/home/about-founder";
+import { CoursesAndFees } from "@/components/home/courses-and-fees";
+import { Faq } from "@/components/home/faq";
 import { Hero } from "@/components/home/hero";
 import { LearningPath } from "@/components/home/learning-path";
 import { Testimonials } from "@/components/home/testimonials";
 import { CtaBanner } from "@/components/shared/cta-banner";
 import { FeatureCard } from "@/components/shared/feature-card";
-import { Button } from "@/components/ui/button";
+import { CourseGridSkeleton } from "@/components/ui/loading-state";
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
 import { features } from "@/data/content";
-import { featuredCourses, getPublishedCourses } from "@/lib/catalog/server";
+import { faqItems } from "@/data/faq";
+import { getPublicFees, getPublishedCourses } from "@/lib/catalog/server";
 import { getPublicTestimonials } from "@/lib/lms/server/testimonials";
-import { CatalogEmpty, CatalogError } from "@/components/course/catalog-states";
-import { CourseGridSkeleton } from "@/components/ui/loading-state";
 
-/** Featured published courses from Firestore (falls back to the first published courses). */
-async function FeaturedCourses() {
-  const result = await getPublishedCourses();
-  if (!result.ok) return <CatalogError />;
-  if (result.data.length === 0) return <CatalogEmpty />;
-  return <CourseGrid courses={featuredCourses(result.data, 4)} columns={4} />;
+/** The one public courses + fees section (cached; refreshed when a teacher changes courses or rates). */
+async function CoursesSection() {
+  const [catalog, fee] = await Promise.all([getPublishedCourses(), getPublicFees()]);
+  return <CoursesAndFees catalog={catalog} fee={fee} />;
+}
+
+async function FaqSection() {
+  return <Faq items={faqItems(await getPublicFees())} />;
 }
 
 /** Approved, consented student testimonials only (cached; refreshed on moderation). */
@@ -37,24 +37,9 @@ export default function HomePage() {
       <Hero />
       <AboutFounder />
 
-      <Section spacing="lg">
-        <SectionHeader
-          align="left"
-          eyebrow="Featured courses"
-          title="Courses crafted for every stage"
-          description="Whether you are taking your first steps or preparing for the stage, find a programme that fits your voice and schedule."
-          action={
-            <Button asChild variant="outline">
-              <Link href="/courses">
-                View all courses <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          }
-        />
-        <Suspense fallback={<CourseGridSkeleton count={4} />}>
-          <FeaturedCourses />
-        </Suspense>
-      </Section>
+      <Suspense fallback={<CourseGridSkeleton count={3} />}>
+        <CoursesSection />
+      </Suspense>
 
       <Section tone="muted" pattern="kolam" spacing="lg">
         <SectionHeader
@@ -72,6 +57,9 @@ export default function HomePage() {
       <LearningPath />
       <Suspense fallback={null}>
         <StudentStories />
+      </Suspense>
+      <Suspense fallback={null}>
+        <FaqSection />
       </Suspense>
       <CtaBanner />
     </>

@@ -7,7 +7,7 @@ import { Logo } from "@/components/layout/logo";
 import { InstagramIcon, YouTubeIcon } from "@/components/shared/social-icons";
 import { Container } from "@/components/ui/container";
 import { footerNav, siteConfig, type NavItem } from "@/config/site";
-import { featuredCourses, getPublishedCourses } from "@/lib/catalog/server";
+import { getPublishedCourses, openCourses } from "@/lib/catalog/server";
 
 // `new Date()` is not allowed in the prerendered shell under Cache Components,
 // so the year is computed inside a cached scope.
@@ -29,7 +29,7 @@ const contactItems = [
   { icon: Clock, label: siteConfig.contact.hours },
 ];
 
-const ALL_COURSES: NavItem = { label: "All courses", href: "/courses" };
+const ALL_COURSES: NavItem = { label: "Courses & fees", href: "/#courses" };
 
 function FooterColumn({ title, items }: { title: string; items: NavItem[] }) {
   return (
@@ -48,13 +48,11 @@ function FooterColumn({ title, items }: { title: string; items: NavItem[] }) {
   );
 }
 
-/** Featured published courses from Firestore (cached with the catalogue). */
-async function PopularCourses() {
+/** Courses open for enrolment (cached with the catalogue). */
+async function OpenCourses() {
   const result = await getPublishedCourses();
-  const items = result.ok
-    ? featuredCourses(result.data, 4).map((course) => ({ label: course.title, href: `/courses/${course.slug}` }))
-    : [];
-  return <FooterColumn title="Popular Courses" items={items.length > 0 ? items : [ALL_COURSES]} />;
+  const items = result.ok ? openCourses(result.data, 4).map((course) => ({ label: course.title, href: `/courses/${course.slug}` })) : [];
+  return <FooterColumn title="Open for Enrolment" items={[...items, ALL_COURSES]} />;
 }
 
 export function Footer() {
@@ -89,8 +87,8 @@ export function Footer() {
           <Fragment key={group.title}>
             <FooterColumn title={group.title} items={group.items} />
             {index === 0 && (
-              <Suspense fallback={<FooterColumn title="Popular Courses" items={[ALL_COURSES]} />}>
-                <PopularCourses />
+              <Suspense fallback={<FooterColumn title="Open for Enrolment" items={[ALL_COURSES]} />}>
+                <OpenCourses />
               </Suspense>
             )}
           </Fragment>

@@ -496,3 +496,66 @@ describe("Firestore security rules (browser access)", () => {
     assert.equal(dues.status, 403);
   });
 });
+
+describe("public courses & fees (server catalogue against Firestore)", () => {
+  const catalog = () => import("@/lib/catalog/server");
+  const write = (slug, data) =>
+    db.collection("courses").doc(id(slug)).set({ id: id(slug), slug, title: slug, description: "", status: "published", teacherIds: [teacher.uid], ...data });
+
+  test("only reviewed published courses are listed; approved catalogue fills the gaps; fees come from the billing rates", async () => {
+    // Unreviewed template course (published, no availability) and a draft that owns an approved slug.
+    await write(`template-${run}`, { availability: null, price: 4999, tag: "Bestseller" });
+    await write("little-swaras", { status: "draft", availability: "open" });
+    // A teacher-managed open course and a coming-soon course.
+    await write(`teacher-open-${run}`, { title: "Teacher course", availability: "open", price: 9999 });
+    await write(`teacher-soon-${run}`, { availability: "coming_soon" });
+    const { getPublishedCourses, getPublishedCourseBySlug, getPublicFees } = await catalog();
+
+    const result = await getPublishedCourses();
+    assert.equal(result.ok, true);
+    const bySlug = new Map(result.data.map((c) => [c.slug, c]));
+    assert.equal(bySlug.has(`template-${run}`), false, "unreviewed template course hidden");
+    assert.equal(bySlug.has("little-swaras"), false, "a draft with an approved slug is not replaced by the fallback");
+    assert.equal(bySlug.get("swara-foundation")?.source, "approved", "approved fallback shown");
+    assert.deepEqual(bySlug.get(`teacher-open-${run}`)?.fee, { batchMinor: 40_000, individualMinor: 75_000, siblingBatchMinor: 36_000, siblingDiscountPercent: 10 });
+    assert.equal(bySlug.get(`teacher-soon-${run}`)?.fee, null);
+    assert.doesNotMatch(JSON.stringify(result.data), /9999|4999|teacher-1/, "no legacy price or teacher ids");
+    assert.deepEqual(await getPublicFees(), bySlug.get("swara-foundation").fee);
+
+    // Detail pages: approved fallback resolves; unreviewed and draft courses do not.
+    assert.equal((await getPublishedCourseBySlug("swara-foundation")).data?.title, "Swara Foundation (Adults)");
+    assert.equal((await getPublishedCourseBySlug(`template-${run}`)).data, null);
+    assert.equal((await getPublishedCourseBySlug("little-swaras")).data, null);
+  });
+
+  test("a rate version in force changes the public fees; a future one does not", async () => {
+    const { getPublicFees } = await catalog();
+    const ref = db.collection("settings").doc("classBilling");
+    const before = await ref.get();
+    try {
+      await ref.set({
+        rateVersions: [
+          { id: "v1", effectiveFrom: "2026-11", batchMinor: 40_000, individualMinor: 75_000, batchAdvanceMinor: 40_000 },
+          { id: "v-past", effectiveFrom: "2026-10", batchMinor: 1, individualMinor: 1, batchAdvanceMinor: 1 },
+          { id: "v-future", effectiveFrom: "2099-01", batchMinor: 99_900, individualMinor: 99_900, batchAdvanceMinor: 40_000 },
+        ],
+      }, { merge: true });
+      const fees = await getPublicFees();
+      assert.equal(fees.batchMinor, 40_000);
+      assert.equal(fees.individualMinor, 75_000);
+    } finally {
+      if (before.exists) await ref.set(before.data());
+      else await ref.delete();
+    }
+  });
+
+  test("the teacher catalogue form parser accepts availability and never overwrites the legacy price unless sent", async () => {
+    const { parseCatalogInput } = await import("@/lib/lms/validation");
+    const open = parseCatalogInput({ availability: "open", level: "", category: "", format: "", tag: "" });
+    assert.deepEqual(open.errors, {});
+    assert.equal(open.value.availability, "open");
+    assert.equal("price" in open.value, false);
+    assert.equal(parseCatalogInput({ availability: "" }).value.availability, null);
+    assert.ok(parseCatalogInput({ availability: "free" }).errors.availability);
+  });
+});

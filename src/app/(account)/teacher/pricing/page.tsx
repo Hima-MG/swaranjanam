@@ -136,7 +136,7 @@ async function Pricing() {
 export default function TeacherPricingPage() {
   return (
     <>
-      <TeacherPageHeader title="Fees & pricing" description="Course and program fees, the pair plan, and the payment methods the academy accepts." />
+      <TeacherPageHeader title="Fees & pricing" description="Legacy package fee plans (not shown on the public website — public fees come from Billing → Rates & policy) and the payment methods the academy accepts." />
       <Suspense fallback={<LoadingState label="Loading fees…" />}>
         <Pricing />
       </Suspense>

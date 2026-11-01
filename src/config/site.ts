@@ -31,7 +31,7 @@ export const siteConfig = {
   fullName: "Swaraanjanam Carnatic Music Academy",
   tagline: "Carnatic Music Academy",
   description:
-    "Learn Carnatic vocal music the traditional way — guided by experienced gurus, structured for modern learners, online and in person.",
+    "Learn Carnatic vocal music the traditional way — live online classes on Google Meet in small batches, at your own pace.",
   url: resolveSiteUrl(),
   contact: {
     email: "swaraanjanammusicacademy@gmail.com",
@@ -67,7 +67,8 @@ export type NavItem = { label: string; href: string };
 
 export const mainNav: NavItem[] = [
   { label: "Home", href: "/" },
-  { label: "Courses", href: "/courses" },
+  { label: "Courses & Fees", href: "/#courses" },
+  { label: "FAQ", href: "/#faq" },
   { label: "About", href: "/about" },
   { label: "Contact", href: "/contact" },
 ];
@@ -79,7 +80,8 @@ export const footerNav: { title: string; items: NavItem[] }[] = [
     title: "Academy",
     items: [
       { label: "About Us", href: "/about" },
-      { label: "All Courses", href: "/courses" },
+      { label: "Courses & Fees", href: "/#courses" },
+      { label: "FAQ", href: "/#faq" },
       { label: "Contact", href: "/contact" },
     ],
   },
