@@ -152,6 +152,8 @@ export function UpcomingClasses({ classes, serverNow }: { classes: StudentClassV
                     <span className="sr-only"> (opens Google Meet in a new tab)</span>
                   </a>
                 </Button>
+              ) : (phase === "joinable" || phase === "upcoming") && c.blockedReason ? (
+                <p className="max-w-xs text-xs text-destructive sm:text-right">{c.blockedReason}</p>
               ) : phase === "joinable" ? (
                 <p className="text-xs text-muted-foreground sm:text-right" role="status">
                   Getting the class link… If the button does not appear, refresh the page.

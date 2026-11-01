@@ -4,6 +4,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { refresh, updateTag } from "next/cache";
 
 import { CATALOG_TAG } from "@/lib/catalog/server";
+import { legacyPackageBlock } from "@/lib/lms/legacy-packages";
 import {
   ADJUSTMENT_KINDS,
   buildPackageDraft,
@@ -191,6 +192,8 @@ export async function createPackage(
 ): Promise<ActionResult<{ packageId: string; duplicate: boolean; accessNotes: string[] }>> {
   return runAction("createPackage", async () => {
     const user = await requireActionUser("teacher");
+    const blocked = legacyPackageBlock("create");
+    if (blocked) throw new AccessError(blocked);
     const packageId = packageIdFor(input?.requestKey);
     if (!packageId) throw new AccessError("This form has expired. Close it and open it again.");
     if (!isValidId(input?.planId)) throw new AccessError("Please fix the highlighted fields.", { planId: "Choose a course or program." });
@@ -330,6 +333,8 @@ export async function createPackage(
 export async function activatePackage(packageId: unknown, reasonInput: unknown): Promise<ActionResult> {
   return runAction("activatePackage", async () => {
     const user = await requireActionUser("teacher");
+    const blocked = legacyPackageBlock("activate");
+    if (blocked) throw new AccessError(blocked);
     if (!isValidId(packageId)) throw new AccessError("That package could not be found.");
     const reason = cleanText(reasonInput, 300);
     const summary = await db().runTransaction(async (tx) => {
@@ -410,6 +415,8 @@ export interface AdjustmentInput {
 export async function recordAdjustment(packageId: unknown, input: AdjustmentInput): Promise<ActionResult> {
   return runAction("recordAdjustment", async () => {
     const user = await requireActionUser("teacher");
+    const blocked = legacyPackageBlock("adjust");
+    if (blocked) throw new AccessError(blocked);
     if (!isValidId(packageId)) throw new AccessError("That package could not be found.");
     if (!(ADJUSTMENT_KINDS as readonly unknown[]).includes(input?.kind)) throw new AccessError("Please fix the highlighted fields.", { kind: "Choose a type." });
     const kind = input.kind as AdjustmentKind;

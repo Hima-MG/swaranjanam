@@ -26,6 +26,21 @@ import type { CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/typ
 //   settings/billing                     — accepted payment methods
 //   settings/receiptCounter              — receipt number sequence (transaction-guarded)
 //
+// Class-based billing and batches (lib/lms/class-billing.ts — rules;
+// lib/lms/server/class-billing.ts, lib/lms/server/batches.ts — data):
+//   batches/{autoId}                      — name, course, teacher, schedule, Meet link, capacity (≤5)
+//   batchMembers/{batchId}_{studentId}    — membership history (active / removed / transferred)
+//   batchMembershipLocks/{studentId}_{courseId} — at most one active batch per learner per course
+//   billingAccounts/ba_{student}_{course}_{mode} — per-learner billing: advance ledger and suspension state
+//   billableClasses/{classId}             — create-once: a batch class is charged at most once per student
+//   invoices/{accountId}_{YYYY-MM}        — one MONTHLY invoice per batch account (never edited; see invoiceAdjustments)
+//   invoiceAdjustments/{autoId}           — credit/debit notes and late-applied advance
+//   advanceLedger/{autoId}                — enrolment advance received / applied (audit trail)
+//   sessionCharges/sc_{classId}           — one ₹750 charge per individual session (paid separately)
+//   legacyDues/{studentId}                — administrator-verified clearance of fees before November 2026
+//   gatewayOrders/{orderId}, gatewayEvents/{eventId} — Razorpay (test mode) idempotency
+//   settings/classBilling                 — billing policy and versioned rates
+//
 // Timestamps are Firestore Timestamps in the database and ISO strings once
 // they leave the data layer, so records can be passed to Client Components.
 
@@ -228,6 +243,12 @@ export interface PaymentRecord {
   enrollmentId: string;
   /** Package payments only. */
   packageId: string | null;
+  /** Class-based billing: what the payment is for, and the account/invoice it belongs to. */
+  purpose: "advance" | "invoice" | "session" | null;
+  accountId: string | null;
+  invoiceId: string | null;
+  /** Individual session charge this payment is for (sessionCharges/{id}). */
+  sessionChargeId: string | null;
   /** Everyone who may see this payment (package learners, or the student). */
   learnerIds: string[];
   /** Who paid, when not the learner (e.g. a parent). */
@@ -356,7 +377,10 @@ export interface AuditEntry {
     | "package"
     | "pricePlan"
     | "receipt"
-    | "testimonial";
+    | "testimonial"
+    | "batch"
+    | "billingAccount"
+    | "invoice";
   targetId: string;
   summary: string;
   at: string | null;

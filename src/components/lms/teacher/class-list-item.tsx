@@ -29,6 +29,11 @@ export function ClassListItem({
             {CLASS_STATUS_LABELS[c.status]}
           </Badge>
           {c.needsOutcome && <Badge variant="outline">Ended — outcome not recorded</Badge>}
+          {c.batchId && (
+            <Link href={`/teacher/batches/${c.batchId}`} className="text-xs font-semibold text-maroon hover:underline">
+              Batch class
+            </Link>
+          )}
           {c.packageId && (
             <Link href={`/teacher/packages/${c.packageId}`} className="text-xs font-semibold text-maroon hover:underline">
               Package credit
@@ -64,7 +69,7 @@ export function ClassListItem({
             </Button>
             <ClassFormDialog students={students} existing={c} packages={packages} />
             {c.started && <RecordOutcomeDialog classId={c.id} title={c.title} packageLinked={Boolean(c.packageId)} />}
-            <CancelClassDialog classId={c.id} title={c.title} when={when} />
+            <CancelClassDialog classId={c.id} title={c.title} when={when} shared={Boolean(c.batchId || c.packageId)} />
           </>
         )}
       </div>

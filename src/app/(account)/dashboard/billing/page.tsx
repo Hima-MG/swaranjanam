@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { CreditsMeter, nextPaymentText, PackageStatusBadge, PaymentStateBadge } from "@/components/lms/billing-display";
+import { PayOnlineButton } from "@/components/lms/student/pay-online-button";
 import { UpcomingClasses } from "@/components/lms/student/upcoming-classes";
 import { PageHero } from "@/components/shared/page-hero";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +12,11 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { Section } from "@/components/ui/section";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
-import { formatDate } from "@/lib/format-date";
+import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
+import { ADVANCE_STATUS_LABELS, BILLING_MODE_LABELS, CLASS_OUTCOME_LABELS, periodLabel, SESSION_CHARGE_LABELS } from "@/lib/lms/class-billing";
+import { getOwnClassBilling } from "@/lib/lms/server/class-billing";
+import { onlinePaymentsEnabled } from "@/lib/payments/razorpay";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
 import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses, listOwnClassHistory } from "@/lib/lms/server/classes";
@@ -25,7 +29,13 @@ const PAYMENT_LABEL = { pending: "Awaiting verification", paid: "Received", fail
 async function StudentBilling() {
   // Every reader below derives the student from this session; no ids come from the URL.
   const user = await requireRole("student", "/dashboard/billing");
-  const [billing, upcoming, history] = await Promise.all([getOwnBilling(user), listOwnClasses(user), listOwnClassHistory(user)]);
+  const [billing, upcoming, history, classBilling] = await Promise.all([
+    getOwnBilling(user),
+    listOwnClasses(user),
+    listOwnClassHistory(user),
+    getOwnClassBilling(user),
+  ]);
+  const payOnline = onlinePaymentsEnabled();
   const { packages, payments, receipts } = billing;
   const upcomingOnly = upcoming.classes.filter((c) => Date.parse(c.endAt) >= upcoming.nowMs && c.status === "scheduled");
 
@@ -36,8 +46,125 @@ async function StudentBilling() {
         Back to dashboard
       </Link>
 
+      {(classBilling.accounts.length > 0 || classBilling.sessions.length > 0) && (
+        <section aria-labelledby="class-billing" className="flex flex-col gap-4">
+          <h2 id="class-billing" className="type-h3">My class fees</h2>
+          {classBilling.accounts.some((a) => a.suspended) && (
+            <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              Your access to lessons and class links is paused because an invoice is unpaid after its payment deadline. It is restored automatically once the
+              payment is verified. Nothing has been deleted.
+            </p>
+          )}
+          <ul className="flex flex-col gap-3">
+            {classBilling.accounts.map((a) => (
+              <li key={a.id} className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 text-sm shadow-soft">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold text-brown">{a.courseTitle}</h3>
+                    <p className="text-xs text-muted-foreground">
+                      {BILLING_MODE_LABELS[a.mode]}
+                      {a.status === "closed" ? " · closed" : ""}
+                    </p>
+                  </div>
+                  {a.suspended && <Badge variant="destructive">Access paused</Badge>}
+                </div>
+                {a.mode === "batch" && (
+                  <>
+                    <p className="text-brown">
+                      Enrolment advance{a.advance.amountMinor > 0 ? ` (${formatMoney(a.advance.amountMinor)}, non-refundable)` : ""}: {ADVANCE_STATUS_LABELS[a.advance.status]}
+                      {a.advance.remainingMinor > 0 ? ` — ${formatMoney(a.advance.remainingMinor)} will be deducted from your next invoice` : ""}
+                    </p>
+                    {a.advance.status === "awaiting" && payOnline && <PayOnlineButton kind="advance" id={a.id} label={`Pay advance ${formatMoney(a.advance.amountMinor)}`} />}
+                    <p className="text-xs text-muted-foreground">
+                      Classes are invoiced at the end of each month (attended and missed classes are counted; classes cancelled by the academy are not).
+                    </p>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {classBilling.uninvoiced.map((u) => (
+            <p key={u.courseTitle} className="text-sm text-muted-foreground">
+              {u.courseTitle}: {u.count} class{u.count === 1 ? "" : "es"} so far, {formatMoney(u.amountMinor)} — to be invoiced after the month ends.
+            </p>
+          ))}
+
+          {classBilling.invoices.length > 0 && (
+            <ul className="flex flex-col gap-3">
+              {classBilling.invoices.map((i) => (
+                <li key={i.id} className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 text-sm shadow-soft">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-brown">
+                      {i.courseTitle} — {periodLabel(i.period)}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      {i.summary.balanceMinor > 0 && i.dueState === "overdue" && <Badge variant="destructive">Past the payment deadline</Badge>}
+                      {i.summary.balanceMinor > 0 && i.dueState === "grace" && <Badge variant="outline">Grace period</Badge>}
+                      <Badge variant={i.summary.state === "paid" ? "gold" : i.summary.state === "partial" ? "outline" : "secondary"}>
+                        {i.summary.state === "paid" ? "Paid" : i.summary.state === "partial" ? "Partly paid" : "Unpaid"}
+                      </Badge>
+                    </span>
+                  </div>
+                  <ul className="text-muted-foreground">
+                    {i.lines.map((l) => (
+                      <li key={l.classId}>
+                        {l.date} · {l.title} · {CLASS_OUTCOME_LABELS[l.outcome]} · {formatMoney(l.rateMinor)}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-brown">
+                    {i.lines.length} class{i.lines.length === 1 ? "" : "es"}: {formatMoney(i.subtotalMinor)}
+                    {i.advanceAppliedMinor > 0 ? ` − ${formatMoney(i.advanceAppliedMinor)} enrolment advance` : ""}
+                    {i.summary.creditsMinor > 0 || i.summary.debitsMinor > 0 ? " (with adjustments)" : ""} · total {formatMoney(i.summary.totalDueMinor)} · paid {formatMoney(i.summary.paidMinor)} ·{" "}
+                    <span className="font-semibold">balance {formatMoney(Math.max(i.summary.balanceMinor, 0))}</span>
+                  </p>
+                  {i.summary.balanceMinor > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Due {formatDate(i.dueAt)} · please pay by {formatDateTime(i.deadlineAt)} (IST) to avoid a pause in access.
+                    </p>
+                  )}
+                  {i.summary.pendingMinor > 0 && <p className="text-xs text-muted-foreground">{formatMoney(i.summary.pendingMinor)} awaiting verification</p>}
+                  {i.summary.balanceMinor > 0 && payOnline && <PayOnlineButton kind="invoice" id={i.id} label={`Pay ${formatMoney(i.summary.balanceMinor)}`} />}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {classBilling.sessions.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <h3 className="font-semibold text-brown">Individual sessions</h3>
+              <ul className="divide-y divide-border rounded-2xl border border-border bg-card text-sm shadow-soft">
+                {classBilling.sessions.map((s) => (
+                  <li key={s.id} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>
+                      <span className="font-medium text-brown">
+                        {s.date} {s.startTime} IST · {s.title}
+                      </span>
+                      {s.cancelKind && <span className="block text-xs text-muted-foreground">Cancelled</span>}
+                    </span>
+                    <span className="flex flex-col items-start gap-2 sm:items-end">
+                      <span className="flex items-center gap-2">
+                        <Badge variant={s.status === "paid" ? "gold" : s.status === "due" ? "outline" : "secondary"}>{SESSION_CHARGE_LABELS[s.status]}</Badge>
+                        <span className="font-semibold text-brown">{s.status === "no_charge" ? "₹0" : formatMoney(s.amountMinor)}</span>
+                      </span>
+                      {s.status === "due" && payOnline && <PayOnlineButton kind="session" id={s.id} label={`Pay ${formatMoney(s.amountMinor)}`} />}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                Each session is paid separately. Cancel at least 24 hours before the start for no charge; later cancellations remain payable.
+              </p>
+            </div>
+          )}
+          {!payOnline && <p className="text-xs text-muted-foreground">To pay, contact the academy. Payments appear here once the academy has verified them.</p>}
+        </section>
+      )}
+
+      {packages.length > 0 && (
       <section aria-labelledby="packages" className="flex flex-col gap-4">
-        <h2 id="packages" className="type-h3">My packages</h2>
+        <h2 id="packages" className="type-h3">My packages (prepaid)</h2>
         {packages.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">
             No packages yet. Your teacher sets up your class package when you enrol.
@@ -94,6 +221,7 @@ async function StudentBilling() {
           </ul>
         )}
       </section>
+      )}
 
       <section aria-labelledby="payments" className="flex flex-col gap-4">
         <h2 id="payments" className="type-h3">My payments</h2>

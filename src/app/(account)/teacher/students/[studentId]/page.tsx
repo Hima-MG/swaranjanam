@@ -7,7 +7,9 @@ import { Suspense } from "react";
 import { CreditsMeter, nextPaymentText, PackageStatusBadge, PaymentStateBadge } from "@/components/lms/billing-display";
 import { ProgressBar } from "@/components/lms/progress-bar";
 import { CourseStatusBadge } from "@/components/lms/teacher/course-status-badge";
-import { AssignPackageDialog } from "@/components/lms/teacher/package-controls";
+import { LegacyDuesForm } from "@/components/lms/teacher/class-billing-controls";
+import { LEGACY_DUES_LABELS } from "@/lib/lms/class-billing";
+import { legacyDuesRef, mapLegacyDues } from "@/lib/lms/server/class-billing";
 import { EditFeeDialog, PaymentStatusActions, RecordPaymentDialog } from "@/components/lms/teacher/payment-dialogs";
 import { PaymentStatusBadge } from "@/components/lms/teacher/payment-status-badge";
 import { EnrollInCourseForm, EnrollmentAccessControl } from "@/components/lms/teacher/student-enrollment-controls";
@@ -19,8 +21,8 @@ import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
 import { getStudentDetail } from "@/lib/lms/server/admin";
-import { getBillingSettings, getStudentPackagesForTeacher, listPayablePackages, listPlans } from "@/lib/lms/server/billing";
-import { listClassesForStudent, listStudentOptions } from "@/lib/lms/server/classes";
+import { getBillingSettings, getStudentPackagesForTeacher } from "@/lib/lms/server/billing";
+import { listClassesForStudent } from "@/lib/lms/server/classes";
 import { getStudentPayments } from "@/lib/lms/server/payments";
 import { PAYMENT_METHOD_LABELS } from "@/lib/lms/types";
 
@@ -46,18 +48,15 @@ function BalanceLine({ balance }: { balance?: { balanceMinor: number | null; cur
 async function StudentProfile({ params }: { params: Params }) {
   const { studentId } = await params;
   const teacher = await requireRole("teacher", `/teacher/students/${studentId}`);
-  const [data, money, packages, classes, plans, students, payable, settings] = await Promise.all([
+  const [data, money, packages, classes, settings] = await Promise.all([
     getStudentDetail(teacher, studentId),
     getStudentPayments(teacher, studentId),
     getStudentPackagesForTeacher(teacher, studentId),
     listClassesForStudent(teacher, studentId),
-    listPlans(),
-    listStudentOptions(teacher),
-    listPayablePackages(teacher),
     getBillingSettings(),
   ]);
+  const legacy = mapLegacyDues(await legacyDuesRef(studentId).get());
   if (!data) notFound();
-  const ownPackageIds = new Set(packages.map((p) => p.id));
   const { student, enrollments, availableCourses } = data;
   const balanceByEnrollment = new Map(money.balances.map((b) => [b.enrollmentId, b]));
   const name = student.displayName ?? student.email ?? "Unnamed student";
@@ -184,12 +183,30 @@ async function StudentProfile({ params }: { params: Params }) {
         )}
       </section>
 
+      <section aria-labelledby="old-dues" className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-soft">
+        <h2 id="old-dues" className="type-h3">
+          Old dues (before November 2026)
+        </h2>
+        <p className="text-sm text-brown">
+          Status: <span className="font-semibold">{legacy ? LEGACY_DUES_LABELS[legacy.status] : LEGACY_DUES_LABELS.not_verified}</span>
+          {legacy && (
+            <span className="block text-xs text-muted-foreground">
+              Verified by {legacy.verifiedByEmail ?? "an administrator"} on {formatDateTime(legacy.verifiedAt)} — {legacy.note}
+            </span>
+          )}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Fees up to October 2026 were paid with the previous method. Website billing (batches and individual sessions) starts only after an administrator verifies this.
+          Amounts are not entered here.
+        </p>
+        <LegacyDuesForm studentId={student.uid} current={legacy?.status ?? null} />
+      </section>
+
       <section aria-labelledby="packages" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="packages" className="type-h3">
             Packages
           </h2>
-          <AssignPackageDialog plans={plans} students={students} defaultStudentId={student.uid} />
         </div>
         {packages.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">No packages assigned yet.</p>
@@ -269,7 +286,7 @@ async function StudentProfile({ params }: { params: Params }) {
           </h2>
           <RecordPaymentDialog
             enrollmentOptions={enrollments.map((e) => ({ id: e.id, label: `${e.courseTitle}${e.status === "revoked" ? " (revoked)" : ""}` }))}
-            packageOptions={payable.filter((p) => ownPackageIds.has(p.id))}
+            packageOptions={[]}
             methods={settings.methods}
           />
         </div>
@@ -294,7 +311,7 @@ async function StudentProfile({ params }: { params: Params }) {
                 </span>
                 <span className="flex flex-wrap items-center justify-end gap-2">
                   <PaymentStatusBadge status={p.status} verified={p.verified} />
-                  <PaymentStatusActions paymentId={p.id} status={p.status} source={p.source} />
+                  <PaymentStatusActions paymentId={p.id} status={p.status} source={p.source} purpose={p.purpose} />
                 </span>
               </li>
             ))}

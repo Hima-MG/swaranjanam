@@ -15,6 +15,10 @@ import { getUserProfile } from "@/lib/auth/profile";
 import { requireRole } from "@/lib/auth/session";
 import { getStudentOverview } from "@/lib/lms/server/student";
 import { listAnnouncementsForStudent } from "@/lib/lms/server/announcements";
+import { getOwnBatches } from "@/lib/lms/server/batches";
+import { getOwnClassBilling } from "@/lib/lms/server/class-billing";
+import { formatMoney } from "@/lib/format";
+import { periodLabel } from "@/lib/lms/class-billing";
 import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses } from "@/lib/lms/server/classes";
 import { TestimonialPanel } from "@/components/lms/student/testimonial-panel";
@@ -27,7 +31,7 @@ export const metadata: Metadata = { title: "My Dashboard" };
 async function StudentDashboard() {
   // Server-side guard: signed-out visitors go to /login, teachers to /teacher.
   const user = await requireRole("student", "/dashboard");
-  const [profile, overview, announcements, liveClasses, billing, ownTestimonials] = await Promise.all([
+  const [profile, overview, announcements, liveClasses, billing, ownTestimonials, batches, classBilling] = await Promise.all([
     getUserProfile(user.uid),
     getStudentOverview(user),
     listAnnouncementsForStudent(user),
@@ -36,7 +40,14 @@ async function StudentDashboard() {
     getOwnBilling(user),
     // Own submissions only (bound to user.uid in the data layer).
     getOwnTestimonials(user),
+    // Only batches the student is an ACTIVE member of (server-checked).
+    getOwnBatches(user),
+    getOwnClassBilling(user),
   ]);
+  // In-app fee reminders (no email/WhatsApp provider is configured).
+  const unpaidInvoices = classBilling.invoices.filter((i) => i.summary.balanceMinor > 0);
+  const sessionsDue = classBilling.sessions.filter((s) => s.status === "due");
+  const paused = classBilling.accounts.some((a) => a.suspended);
   const currentPackages = billing.packages.filter((p) => p.status !== "cancelled" && p.status !== "credits_used").slice(0, 2);
   const name = profile?.displayName ?? user.name ?? "Student";
 
@@ -70,6 +81,65 @@ async function StudentDashboard() {
             <h2 className="type-h3">Welcome to your music journey</h2>
           )}
         </div>
+
+        {(paused || unpaidInvoices.length > 0 || sessionsDue.length > 0) && (
+          <section
+            aria-label="Fee reminder"
+            className={
+              paused
+                ? "flex flex-col gap-2 rounded-2xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"
+                : "flex flex-col gap-2 rounded-2xl border border-gold/40 bg-gold-soft/40 p-5 text-sm text-brown"
+            }
+          >
+            <p className="font-semibold">{paused ? "Access paused — fees overdue" : "Fee reminder"}</p>
+            <ul className="list-disc pl-5">
+              {unpaidInvoices.map((i) => (
+                <li key={i.id}>
+                  {i.courseTitle}, {periodLabel(i.period)}: {formatMoney(i.summary.balanceMinor)} — pay by {formatDate(i.deadlineAt)}
+                  {i.dueState === "overdue" ? " (deadline passed)" : ""}
+                </li>
+              ))}
+              {sessionsDue.map((s) => (
+                <li key={s.id}>
+                  Individual session {s.date} {s.startTime} IST: {formatMoney(s.amountMinor)} due
+                </li>
+              ))}
+            </ul>
+            <Link href="/dashboard/billing" className="self-start font-semibold underline">
+              View and pay
+            </Link>
+          </section>
+        )}
+
+        {batches.map((b) => (
+          <section key={b.id} aria-label={`Batch ${b.name}`} className="flex flex-col gap-3 rounded-2xl border border-gold/40 bg-gold-soft/30 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="type-eyebrow text-gold">My batch</p>
+                <h2 className="type-h3">{b.name}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {b.courseTitle} · with {b.teacherName}
+                </p>
+                <p className="text-sm text-brown">{b.schedule}</p>
+              </div>
+              {b.meetUrl && (
+                <Button asChild variant="outline" size="sm">
+                  <a href={b.meetUrl} target="_blank" rel="noopener noreferrer">
+                    Batch Google Meet link
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                </Button>
+              )}
+            </div>
+            {b.upcoming.length > 0 ? (
+              <UpcomingClasses classes={b.upcoming} serverNow={b.nowMs} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {b.suspended ? "Class links are paused until the overdue invoice is paid and verified." : "No upcoming batch classes scheduled yet."}
+              </p>
+            )}
+          </section>
+        ))}
 
         <section aria-labelledby="live-classes" className="flex flex-col gap-3">
           <h2 id="live-classes" className="type-h3">

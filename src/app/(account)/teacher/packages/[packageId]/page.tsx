@@ -5,17 +5,18 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
 import { CreditsMeter, nextPaymentText, PackageStatusBadge, PaymentStateBadge } from "@/components/lms/billing-display";
-import { ActivatePackageDialog, AdjustmentDialog, CancelPackageDialog } from "@/components/lms/teacher/package-controls";
-import { PaymentStatusActions, RecordPaymentDialog } from "@/components/lms/teacher/payment-dialogs";
+import { CancelPackageDialog } from "@/components/lms/teacher/package-controls";
+import { PaymentStatusActions } from "@/components/lms/teacher/payment-dialogs";
 import { PaymentStatusBadge } from "@/components/lms/teacher/payment-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
-import { ADJUSTMENT_KIND_LABELS, countsAsReceived, LEARNER_CATEGORY_LABELS, PACKAGE_TYPE_LABELS, PAIR_TYPE_LABELS, type PairType } from "@/lib/lms/billing";
+import { ADJUSTMENT_KIND_LABELS, LEARNER_CATEGORY_LABELS, PACKAGE_TYPE_LABELS, PAIR_TYPE_LABELS, type PairType } from "@/lib/lms/billing";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
-import { getBillingSettings, getPackageDetail } from "@/lib/lms/server/billing";
+import { LEGACY_PACKAGES_MESSAGE } from "@/lib/lms/legacy-packages";
+import { getPackageDetail } from "@/lib/lms/server/billing";
 import { PAYMENT_METHOD_LABELS } from "@/lib/lms/types";
 
 export const metadata: Metadata = { title: "Package · Teacher" };
@@ -31,7 +32,7 @@ function basisLabel(basis: string): string {
 async function PackageDetail({ params }: { params: Params }) {
   const { packageId } = await params;
   const teacher = await requireRole("teacher", `/teacher/packages/${packageId}`);
-  const [detail, settings] = await Promise.all([getPackageDetail(teacher, packageId), getBillingSettings()]);
+  const detail = await getPackageDetail(teacher, packageId);
   if (!detail) notFound();
   const { pkg, summary, next, payments, adjustments, classes, receipts } = detail;
   const nextText = nextPaymentText(next, pkg.currency);
@@ -67,26 +68,10 @@ async function PackageDetail({ params }: { params: Params }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {pkg.status !== "cancelled" && (
-            <RecordPaymentDialog
-              enrollmentOptions={[]}
-              packageOptions={[{ id: pkg.id, label: `${pkg.learners.map((l) => l.name).join(" + ")} — ${pkg.title}` }]}
-              methods={settings.methods}
-              defaultTarget={`package:${pkg.id}`}
-            />
-          )}
-          {pkg.status === "awaiting_payment" && <ActivatePackageDialog packageId={pkg.id} balanceMinor={summary.balanceMinor} />}
-          {pkg.status !== "cancelled" && (
-            <AdjustmentDialog
-              packageId={pkg.id}
-              refundablePayments={payments
-                .filter(countsAsReceived)
-                .map((p) => ({ id: p.id, label: `${formatMoney(p.amountMinor, p.currency)} · ${formatDate(p.paidAt)} · ${PAYMENT_METHOD_LABELS[p.method]}` }))}
-            />
-          )}
           {pkg.status !== "cancelled" && <CancelPackageDialog packageId={pkg.id} title={pkg.title} />}
         </div>
       </div>
+      <p className="text-sm text-muted-foreground">{LEGACY_PACKAGES_MESSAGE} This record is kept unchanged as history.</p>
 
       <section aria-label="Summary" className="grid gap-4 rounded-2xl border border-border bg-card p-5 shadow-soft sm:grid-cols-2 lg:grid-cols-4">
         <div>
@@ -170,7 +155,7 @@ async function PackageDetail({ params }: { params: Params }) {
                   </span>
                   <span className="flex flex-wrap items-center justify-end gap-2">
                     <PaymentStatusBadge status={p.status} verified={p.verified} />
-                    <PaymentStatusActions paymentId={p.id} status={p.status} source={p.source} />
+                    <PaymentStatusActions paymentId={p.id} status={p.status} source={p.source} purpose={p.purpose} />
                   </span>
                 </li>
               );

@@ -765,7 +765,7 @@ function historyEvent(type: "enrolled" | "revoked" | "restored", by: string) {
 /** Creates or re-activates an enrollment. Returns what happened. */
 async function grantEnrollment(
   actor: Awaited<ReturnType<typeof requireActionUser>>,
-  course: { id: string; title: string; price: number | null; status: CourseStatus },
+  course: { id: string; title: string; status: CourseStatus },
   student: AdminAuthUser,
 ) {
   const ref = col("enrollments").doc(enrollmentId(course.id, student.uid));
@@ -793,8 +793,10 @@ async function grantEnrollment(
       enrolledBy: actor.uid,
       revokedAt: null,
       revokedBy: null,
-      // Fee snapshot: later course price changes do not alter this student's balance.
-      agreedFee: course.price,
+      // Never copied from the catalogue (course.price is legacy template data and
+      // not an approved fee). Website fees are billed through billing accounts;
+      // a teacher can still set an agreed fee explicitly, with a reason.
+      agreedFee: null,
       currency: DEFAULT_CURRENCY,
       history: [historyEvent("enrolled", actor.uid)],
     });

@@ -12,7 +12,11 @@
     "lint": "eslint",
     "set-role": "node scripts/set-role.mjs",
     "migrate:courses": "node scripts/migrate-courses.mjs",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"tests/unit/**/*.test.mjs\""
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"tests/unit/**/*.test.mjs\"",
+    "emulators": "firebase emulators:start --only auth,firestore --project demo-swaranjanam",
+    "seed:emulator": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-transform-types --import ./tests/support/register.mjs scripts/seed-emulator.mjs",
+    "dev:emulator": "node scripts/dev-emulator.mjs",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-swaranjanam \"node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-transform-types --import ./tests/support/register.mjs --test tests/emulator/class-billing.emulator.test.mjs\""
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -20,7 +24,7 @@
     "firebase": "^13.0.0",
     "firebase-admin": "^13.10.0",
     "lucide-react": "^1.53.0",
-    "next": "16.4.0",
+    "next": "16.4.3",
     "radix-ui": "^1.7.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -32,7 +36,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.4.0",
+    "eslint-config-next": "16.4.3",
     "shadcn": "^4.21.4",
     "tailwindcss": "^4",
     "typescript": "^5"

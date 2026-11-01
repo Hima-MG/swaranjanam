@@ -14,6 +14,7 @@ rules_version = '2';
 //   reviews/{courseId}_{studentId}       server only; moderated by teachers
 //   announcements/{autoId}               server only; students see theirs via the app
 //   liveClasses/{autoId}                 server only; students see their own via the app
+//   billingAccounts/{ba_…}               server only; read by the rules to pause access while suspended
 //   auditLogs/{autoId}                   teacher-only (server); no client access
 //   testimonials/{autoId}                server only; public site shows approved + consented
 //                                        ones through the app. Covered by the catch-all deny.
@@ -56,12 +57,23 @@ service cloud.firestore {
       return isTeacher() && exists(/databases/$(database)/documents/courses/$(courseId));
     }
 
+    // Billing suspension (unpaid invoice after its payment deadline) pauses
+    // course access. Billing accounts have deterministic ids
+    // ba_{studentId}_{courseId}_{batch|individual} (src/lib/lms/class-billing.ts),
+    // so a direct client read is refused exactly when the app refuses it.
+    function suspendedAccount(courseId, mode) {
+      let path = /databases/$(database)/documents/billingAccounts/$("ba_" + request.auth.uid + "_" + courseId + "_" + mode);
+      return exists(path) && get(path).data.get("suspension", {}).get("active", false) == true;
+    }
+
     function enrolledIn(courseId) {
       let path = /databases/$(database)/documents/enrollments/$(courseId + "_" + request.auth.uid);
       return isSignedIn()
         && exists(path)
         && get(path).data.status == "active"
-        && course(courseId).status in ["published", "archived"];
+        && course(courseId).status in ["published", "archived"]
+        && !suspendedAccount(courseId, "batch")
+        && !suspendedAccount(courseId, "individual");
     }
 
     match /users/{uid} {

@@ -41,6 +41,12 @@ export interface LiveClassRecord {
    * one package credit. Single classes: the class id.
    */
   sessionKey: string | null;
+  /** Batch whose session this record belongs to (one record per learner). */
+  batchId: string | null;
+  /** Class-based billing account charged for this learner's class (new billing model). */
+  billingAccountId: string | null;
+  /** Why a cancelled class was cancelled. Older records: null (treated as academy). */
+  cancelKind: "academy" | "student" | "rescheduled" | null;
   title: string;
   /** ISO instants (UTC) of the scheduled start/end. */
   startAt: string;
@@ -87,6 +93,8 @@ export interface StudentClassView {
   attendance: "attended" | "absent" | null;
   /** Uses a credit from one of the student's packages. */
   packageLinked: boolean;
+  /** Set when joining is blocked (e.g. access suspended for unpaid fees). */
+  blockedReason?: string | null;
 }
 
 export function toStudentView(record: LiveClassRecord, teacherName: string, now: number): StudentClassView {
@@ -238,7 +246,7 @@ export function joinPhase(view: Pick<StudentClassView, "status" | "startAt" | "e
 
 // --- Client timing decisions (pure, for the student's class list) ------------------
 
-type TimedClass = Pick<StudentClassView, "status" | "startAt" | "endAt" | "meetUrl">;
+type TimedClass = Pick<StudentClassView, "status" | "startAt" | "endAt" | "meetUrl" | "blockedReason">;
 
 /** When the joining window of a class opens. */
 export function windowOpensAt(c: Pick<StudentClassView, "startAt">): number {
@@ -268,7 +276,7 @@ export function nextWindowOpen(classes: TimedClass[], serverClock: number): numb
 
 /** A class is joinable by this clock but the server has not supplied its link yet. */
 export function isWaitingForLink(classes: TimedClass[], now: number): boolean {
-  return classes.some((c) => joinPhase(c, now) === "joinable" && !c.meetUrl);
+  return classes.some((c) => joinPhase(c, now) === "joinable" && !c.meetUrl && !c.blockedReason);
 }
 
 // --- Display (always IST, deterministic) ---------------------------------------------

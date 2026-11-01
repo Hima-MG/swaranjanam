@@ -56,13 +56,18 @@ export function ClassFormDialog({
   students,
   existing,
   packages = [],
+  individualAccounts = [],
 }: {
   students: { uid: string; label: string }[];
   existing?: EditableClass;
   packages?: SchedulablePackage[];
+  /** Active individual-session accounts (₹750 per session, paid per session). */
+  individualAccounts?: { id: string; studentId: string; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [packageId, setPackageId] = useState("");
+  const [studentId, setStudentId] = useState(existing?.studentId ?? "");
+  const studentAccounts = existing ? [] : individualAccounts.filter((a) => a.studentId === studentId);
   const { pending, error, fieldErrors: e, run, reset } = useServerAction();
   const chosenPackage = packages.find((p) => p.id === packageId) ?? null;
   const lockedStudent = Boolean(existing?.packageId);
@@ -77,6 +82,7 @@ export function ClassFormDialog({
         if (next) {
           reset();
           setPackageId("");
+          setStudentId(existing?.studentId ?? "");
         }
         setOpen(next);
       }}
@@ -106,6 +112,7 @@ export function ClassFormDialog({
           const input = {
             packageId: existing ? undefined : d.get("packageId") || undefined,
             studentId: chosenPackage ? undefined : d.get("studentId"),
+            billingAccountId: existing || chosenPackage ? undefined : d.get("billingAccountId") || undefined,
             title: d.get("title"),
             date: d.get("date"),
             startTime: d.get("startTime"),
@@ -146,11 +153,33 @@ export function ClassFormDialog({
             </>
           ) : (
             <Field id={`c-studentId-${id}`} label="Student" error={e.studentId}>
-              <NativeSelect id={`c-studentId-${id}`} name="studentId" defaultValue={existing?.studentId ?? ""} required {...invalid("studentId")}>
+              <NativeSelect
+                id={`c-studentId-${id}`}
+                name="studentId"
+                value={studentId}
+                onChange={(ev) => setStudentId(ev.target.value)}
+                required
+                {...invalid("studentId")}
+              >
                 <option value="">Choose a student…</option>
                 {students.map((s) => (
                   <option key={s.uid} value={s.uid}>{s.label}</option>
                 ))}
+              </NativeSelect>
+            </Field>
+          )}
+          {!chosenPackage && studentAccounts.length > 0 && (
+            <Field
+              id={`c-billingAccountId-${id}`}
+              label="Billing"
+              error={e.billingAccountId}
+              hint="An individual session is charged ₹750 and paid separately. Cancelled by the student at least 24 hours before: no charge."
+            >
+              <NativeSelect id={`c-billingAccountId-${id}`} name="billingAccountId" defaultValue={studentAccounts[0].id}>
+                {studentAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.label}</option>
+                ))}
+                <option value="">Not billed</option>
               </NativeSelect>
             </Field>
           )}
@@ -188,7 +217,7 @@ export function ClassFormDialog({
   );
 }
 
-export function CancelClassDialog({ classId, title, when }: { classId: string; title: string; when: string }) {
+export function CancelClassDialog({ classId, title, when, shared = false }: { classId: string; title: string; when: string; shared?: boolean }) {
   const [open, setOpen] = useState(false);
   const { pending, error, run, reset } = useServerAction();
   return (
@@ -207,16 +236,32 @@ export function CancelClassDialog({ classId, title, when }: { classId: string; t
         </Button>
       }
       title="Cancel this class?"
-      description={`“${title}” · ${when}. The student will see it as cancelled and will not be able to join. This cannot be undone — schedule a new class if needed.`}
+      description={`“${title}” · ${when}. ${shared ? "Cancelled by the academy or for rescheduling cancels the whole session for every learner; cancelled by the student cancels only this learner's class. " : ""}This cannot be undone — schedule a new class if needed.`}
     >
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();
-          const reason = new FormData(event.currentTarget).get("reason");
-          run(() => cancelClass(classId, reason), { onSuccess: () => setOpen(false) });
+          const data = new FormData(event.currentTarget);
+          run(() => cancelClass(classId, data.get("reason"), data.get("kind")), { onSuccess: () => setOpen(false) });
         }}
       >
+        <fieldset className="flex flex-col gap-2" disabled={pending}>
+          <legend className="mb-1 text-sm font-medium text-brown">Who cancelled?</legend>
+          {(
+            [
+              ["academy", "The academy"],
+              ["student", "The student"],
+              ["rescheduled", "Moved to another time (rescheduled)"],
+            ] as const
+          ).map(([value, label]) => (
+            <label key={value} className="flex items-center gap-2 text-sm text-brown">
+              <input type="radio" name="kind" value={value} defaultChecked={value === "academy"} className="size-4 accent-maroon" />
+              {label}
+            </label>
+          ))}
+          <p className="text-xs text-muted-foreground">Academy cancellations and reschedules are never charged. A one-to-one session cancelled by the student less than 24 hours before the start stays payable (checked on the server in IST). Student cancellations in a batch follow the billing policy setting.</p>
+        </fieldset>
         <Field id={`cancel-reason-${classId}`} label="Reason (optional, shown to the student)">
           <Input id={`cancel-reason-${classId}`} name="reason" maxLength={300} disabled={pending} />
         </Field>

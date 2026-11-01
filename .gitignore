@@ -45,3 +45,8 @@ service-account*.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebase emulator logs (npm run test:emulator)
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
