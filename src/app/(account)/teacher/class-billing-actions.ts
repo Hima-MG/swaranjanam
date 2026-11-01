@@ -7,8 +7,6 @@ import { CATALOG_TAG } from "@/lib/catalog/server";
 import { paiseToRupeesText, parseRupees } from "@/lib/lms/billing";
 import {
   accountIdFor,
-  advanceAfterApplying,
-  advanceRemaining,
   initialAdvance,
   LEGACY_DUES_STATUSES,
   membershipLockId,
@@ -45,11 +43,11 @@ const rupees = (minor: number) => `₹${paiseToRupeesText(minor)}`;
 const entry = (user: { uid: string; email: string | null }, change: string) => ({ at: Timestamp.now(), by: user.uid, byEmail: user.email, change });
 
 /**
- * Runs the monthly billing job now (same code as the scheduled job): creates
- * missing invoices for completed months and re-evaluates suspensions.
+ * Runs the billing job now (same code as the scheduled job): issues every
+ * cycle invoice that is due and re-evaluates suspensions.
  * Idempotent — running it again changes nothing.
  */
-export async function runBillingNow(): Promise<ActionResult<{ created: number; existing: number; suspended: number; restored: number; errors: number }>> {
+export async function runBillingNow(): Promise<ActionResult<{ created: number; emptyCycles: number; suspended: number; restored: number; errors: number }>> {
   return runAction("runBillingNow", async () => {
     const user = await requireActionUser("teacher");
     const r = await runScheduledBilling(user);
@@ -60,58 +58,7 @@ export async function runBillingNow(): Promise<ActionResult<{ created: number; e
       summary: `Billing run: ${r.invoicesCreated} invoice(s) created, ${r.suspended} suspended, ${r.restored} restored, ${r.errors} error(s)`,
     });
     refresh();
-    return { created: r.invoicesCreated, existing: r.invoicesExisting, suspended: r.suspended, restored: r.restored, errors: r.errors };
-  });
-}
-
-/**
- * Applies the unused VERIFIED advance to an issued, unpaid invoice (e.g. the
- * advance was verified after the first invoice was generated). Recorded as an
- * adjustment and in the advance ledger; never more than what is left.
- */
-export async function applyAdvanceToInvoice(invoiceId: unknown): Promise<ActionResult> {
-  return runAction("applyAdvanceToInvoice", async () => {
-    const user = await requireActionUser("teacher");
-    if (!isValidId(invoiceId)) throw new AccessError("That invoice could not be found.");
-    const applied = await db().runTransaction(async (tx) => {
-      const state = await readPaymentTarget(tx, { kind: "invoice", invoiceId });
-      const remaining = advanceRemaining(state.account.advance);
-      if (remaining <= 0) throw new AccessError("There is no verified, unused advance on this account.");
-      if (!state.summary || state.summary.balanceMinor <= 0) throw new AccessError("This invoice has nothing left to pay.");
-      const amount = Math.min(remaining, state.summary.balanceMinor);
-      const after = advanceAfterApplying(state.account.advance, amount);
-      tx.create(col("invoiceAdjustments").doc(), {
-        invoiceId,
-        accountId: state.account.id,
-        studentId: state.account.studentId,
-        kind: "advance_applied",
-        amountMinor: amount,
-        reason: "Enrolment advance applied (verified after the invoice was created)",
-        by: user.uid,
-        byEmail: user.email,
-        at: FieldValue.serverTimestamp(),
-      });
-      tx.create(col("advanceLedger").doc(), {
-        accountId: state.account.id,
-        studentId: state.account.studentId,
-        kind: "applied",
-        amountMinor: amount,
-        invoiceId,
-        remainingAfterMinor: after.amountMinor - after.appliedMinor,
-        at: FieldValue.serverTimestamp(),
-        by: user.uid,
-      });
-      tx.update(state.accountRef, {
-        "advance.appliedMinor": after.appliedMinor,
-        "advance.status": after.status,
-        history: FieldValue.arrayUnion(entry(user, `Advance ${rupees(amount)} applied to the ${periodLabel(state.invoice!.period)} invoice`)),
-      });
-      return { amount, accountId: state.account.id };
-    });
-    await evaluateSuspension(applied.accountId, user);
-    await writeAudit(user, { action: "invoice.applyAdvance", targetType: "invoice", targetId: invoiceId, summary: `Applied advance ${rupees(applied.amount)}` });
-    refresh();
-    return null;
+    return { created: r.invoicesCreated, emptyCycles: r.emptyCycles, suspended: r.suspended, restored: r.restored, errors: r.errors };
   });
 }
 
@@ -155,7 +102,7 @@ export async function recordInvoiceAdjustment(invoiceId: unknown, kindInput: unk
 
 /**
  * Marks a billing account as closed (left the course). Keeps all history.
- * Charges already recorded are still invoiced by the monthly job. No refund
+ * Charges already recorded are still invoiced by the cycle job. No refund
  * of an unused advance is made automatically (decision pending).
  */
 export async function closeBillingAccount(accountId: unknown, reasonInput: unknown): Promise<ActionResult> {

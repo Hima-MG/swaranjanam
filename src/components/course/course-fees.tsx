@@ -1,4 +1,5 @@
 import { Check, User, Users, UsersRound } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { FEE_TERMS, type PublicCourseFees } from "@/lib/catalog/public-pricing";
 import { formatMoney } from "@/lib/format";
@@ -22,32 +23,53 @@ export function CourseFeeLine({ fee, className }: { fee: PublicCourseFees | null
   );
 }
 
-const OPTIONS = [
-  { key: "batch", icon: Users, title: "Batch class", unit: "per session, per student", note: "Small batches of up to 5 students" },
-  { key: "individual", icon: User, title: "Individual class", unit: "per session", note: "One-to-one with the teacher" },
-  { key: "sibling", icon: UsersRound, title: "Siblings / two learners on one device", unit: "per learner, per batch session", note: "" },
-] as const;
+interface FeeOption {
+  key: string;
+  icon: LucideIcon;
+  title: string;
+  amountMinor: number;
+  unit: string;
+  note: string;
+}
+
+/** The fee options billing can actually charge (the sibling discount only once billing applies it). */
+export function feeOptions(fee: PublicCourseFees): FeeOption[] {
+  return [
+    { key: "batch", icon: Users, title: "Batch class", amountMinor: fee.batchMinor, unit: "per session, per student", note: "Small batches of up to 5 students" },
+    { key: "individual", icon: User, title: "Individual class", amountMinor: fee.individualMinor, unit: "per session", note: "One-to-one with the teacher" },
+    ...(fee.siblingDiscount
+      ? [
+          {
+            key: "sibling",
+            icon: UsersRound,
+            title: "Siblings / two learners on one device",
+            amountMinor: fee.siblingDiscount.batchMinor,
+            unit: "per learner, per batch session",
+            note: `${fee.siblingDiscount.percent}% off the batch fee of ${formatMoney(fee.batchMinor)}`,
+          },
+        ]
+      : []),
+  ];
+}
 
 /** All fee options and how payment works. `headingLevel` keeps the page outline correct. */
 export function FeeSummary({ fee, headingLevel = 3, className }: { fee: PublicCourseFees; headingLevel?: 2 | 3; className?: string }) {
   const Heading = `h${headingLevel}` as const;
-  const amount = { batch: fee.batchMinor, individual: fee.individualMinor, sibling: fee.siblingBatchMinor };
+  const options = feeOptions(fee);
   return (
     <div className={cn("flex flex-col gap-6", className)}>
-      <ul className="grid gap-4 sm:grid-cols-3">
-        {OPTIONS.map(({ key, icon: Icon, title, unit, note }) => (
+      <ul className={cn("grid gap-4", options.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        {options.map(({ key, icon: Icon, title, amountMinor, unit, note }) => (
           <li key={key} className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-soft">
             <span className="flex size-10 items-center justify-center rounded-full bg-maroon-soft text-maroon">
               <Icon className="size-5" aria-hidden="true" />
             </span>
             <Heading className="font-heading text-lg font-semibold text-brown">{title}</Heading>
             <p className="flex flex-wrap items-baseline gap-x-1.5">
-              <span className="font-heading text-3xl font-bold text-maroon">{formatMoney(amount[key])}</span>
+              <span className="font-heading text-3xl font-bold text-maroon">{formatMoney(amountMinor)}</span>
               <span className="text-sm text-muted-foreground">{unit}</span>
             </p>
-            <p className="text-sm text-muted-foreground">
-              {key === "sibling" ? `${fee.siblingDiscountPercent}% off the batch fee of ${formatMoney(fee.batchMinor)}` : note}
-            </p>
+            <p className="text-sm text-muted-foreground">{note}</p>
           </li>
         ))}
       </ul>

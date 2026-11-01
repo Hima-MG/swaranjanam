@@ -18,7 +18,7 @@ import type { Course, CourseCategory, CourseDetail } from "@/types/course";
 //   not exist in Firestore yet (lib/catalog/public-catalog.ts).
 // * Fees: the academy's per-session billing rates in force
 //   (settings/classBilling, Teacher → Billing → Rates & policy) — the same
-//   rates monthly invoices use. Never the legacy course.price, never legacy
+//   rates batch invoices use. Never the legacy course.price, never legacy
 //   package plans, never a student's agreed fee.
 // * Only catalogue fields and module/lesson TITLES leave this module — never
 //   lesson resources, teacher ids, enrolments or payments.

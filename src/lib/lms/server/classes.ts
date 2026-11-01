@@ -3,6 +3,8 @@ import "server-only";
 import type { DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
 
 import type { SessionUser } from "@/lib/auth/session";
+import { BATCH_BLOCK_MESSAGES, batchClassBlock } from "@/lib/lms/class-billing";
+import { mapAccount } from "@/lib/lms/server/class-billing";
 import { col, db, toIso } from "@/lib/lms/server/db";
 import {
   ACADEMY_TIME_ZONE,
@@ -177,8 +179,13 @@ export async function listOwnClasses(user: SessionUser): Promise<{ classes: Stud
     col("liveClasses").where("studentId", "==", user.uid).get(),
     col("billingAccounts").where("studentId", "==", user.uid).get(),
   ]);
-  // Suspended for unpaid fees past the deadline: no Meet links (reversible).
-  const suspendedAccounts = new Set(accountsSnap.docs.filter((d) => d.get("suspension.active") === true).map((d) => d.id));
+  // Batch accounts that may not join the next class: an invoice unpaid past its due date
+  // (suspension) or the first-class payment not yet verified. No Meet links (reversible).
+  const blockedAccounts = new Map(
+    accountsSnap.docs
+      .map((d) => [d.id, batchClassBlock(mapAccount(d) ?? { mode: "individual", status: "closed", advance: { status: "not_required" }, suspension: { active: false } })] as const)
+      .filter((entry): entry is readonly [string, "suspended" | "first_class_unpaid"] => entry[1] !== null),
+  );
   const cutoff = nowMs - RECENT_DAYS * 24 * 60 * 60 * 1000;
   const records = snapshot.docs
     .map(mapLiveClass)
@@ -192,9 +199,8 @@ export async function listOwnClasses(user: SessionUser): Promise<{ classes: Stud
   const classes = records
     .map((c) => {
       const view = toStudentView(c, (c.createdBy && teacherName.get(c.createdBy)) || "Swaraanjanam Academy", nowMs);
-      return c.billingAccountId && suspendedAccounts.has(c.billingAccountId)
-        ? { ...view, meetUrl: null, blockedReason: "Access is paused because an invoice is unpaid after its payment deadline. It is restored once the payment is verified." }
-        : view;
+      const block = c.billingAccountId ? blockedAccounts.get(c.billingAccountId) : undefined;
+      return block ? { ...view, meetUrl: null, blockedReason: BATCH_BLOCK_MESSAGES[block] } : view;
     })
     .sort((a, b) => {
       // Not-yet-ended first (soonest first), then past ones (most recent first).

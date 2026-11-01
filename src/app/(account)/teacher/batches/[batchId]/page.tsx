@@ -10,13 +10,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
-import { formatDate } from "@/lib/format-date";
+import { formatMoney } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format-date";
 import { ADVANCE_STATUS_LABELS, CLASS_OUTCOME_LABELS, MAX_BATCH_CAPACITY } from "@/lib/lms/class-billing";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
 import type { LiveClassRecord } from "@/lib/lms/classes";
 import { getBatchDetail, listCourseOptions, listTeachers } from "@/lib/lms/server/batches";
+import { getAccountsBillingStatus } from "@/lib/lms/server/class-billing";
 
 export const metadata: Metadata = { title: "Batch · Teacher" };
+
+const ROSTER_STATE_LABELS = {
+  paid: "Paid up",
+  pending: "Invoice pending (not yet due)",
+  overdue: "Invoice overdue",
+  suspended: "Suspended (unpaid past due date)",
+  first_class_unpaid: "First-class payment not received",
+} as const;
 
 type Params = PageProps<"/teacher/batches/[batchId]">["params"];
 
@@ -38,6 +48,7 @@ async function BatchDetail({ params }: { params: Params }) {
   const names = new Map(members.map((m) => [m.studentId, m.studentName]));
   const now = detail.nowMs;
   const scheduleBlock = batch.status !== "active" ? "This batch is archived." : !batch.meetUrl ? "Add a Google Meet link first." : active.length === 0 ? "Add learners first." : null;
+  const billing = await getAccountsBillingStatus(teacher, Object.values(accounts));
 
   return (
     <div className="flex flex-col gap-8">
@@ -103,11 +114,25 @@ async function BatchDetail({ params }: { params: Params }) {
                           <Link href={`/teacher/billing/${account.id}`} className="font-semibold text-maroon hover:underline">
                             Billing ({account.billableCount} charged class{account.billableCount === 1 ? "" : "es"})
                           </Link>
-                          {" · "}Advance: {ADVANCE_STATUS_LABELS[account.advance.status]}
-                          {account.suspension.active ? " · access suspended (unpaid invoice)" : ""}
+                          {" · "}First-class payment: {ADVANCE_STATUS_LABELS[account.advance.status]}
                         </>
                       )}
                     </span>
+                    {account && billing[account.id] && m.status === "active" && (
+                      <span className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <Badge variant={billing[account.id].eligibleForNextClass ? "gold" : "destructive"}>
+                          {billing[account.id].eligibleForNextClass ? "Eligible for next class" : "Not eligible for next class"}
+                        </Badge>
+                        <Badge variant={billing[account.id].state === "paid" ? "secondary" : billing[account.id].state === "pending" ? "outline" : "destructive"}>
+                          {ROSTER_STATE_LABELS[billing[account.id].state]}
+                        </Badge>
+                        {billing[account.id].openInvoices.map((i) => (
+                          <span key={i.id} className="text-muted-foreground">
+                            {i.label}: {formatMoney(i.balanceMinor)} for {i.classCount} class{i.classCount === 1 ? "" : "es"} · due {formatDateTime(i.dueAt)}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </span>
                   {m.status === "active" ? (
                     <span className="flex flex-wrap gap-1">
@@ -153,7 +178,7 @@ async function BatchDetail({ params }: { params: Params }) {
           </ul>
         )}
         <p className="text-xs text-muted-foreground">
-          Attended and absent are charged per student (₹400) and invoiced monthly. Academy-cancelled, rescheduled and unknown-attendance classes are not charged. A charged class cannot be changed to a non-billable outcome; use a credit note on the invoice instead.
+          Attended and absent are charged per student. Each student&apos;s first eligible class is paid by the first-class payment; later classes are invoiced per four-week cycle (classes 2–4, then four at a time), due at the end of the cycle&apos;s fourth week. Academy-cancelled, rescheduled and unknown-attendance classes are not charged. A charged class cannot be changed to a non-billable outcome; use a credit note on the invoice instead.
         </p>
       </section>
     </div>

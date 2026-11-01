@@ -64,7 +64,7 @@ async function Payments({ searchParams }: { searchParams: SearchParams }) {
         )}
       </div>
       <p className="text-sm text-muted-foreground">
-        Monthly invoices, the enrolment advance and individual sessions are paid from each student&apos;s billing account (Billing). Legacy packages are read-only.
+        Batch invoices, the first-class payment and individual sessions are paid from each student&apos;s billing account (Billing). Legacy packages are read-only.
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

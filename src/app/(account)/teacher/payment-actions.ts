@@ -53,7 +53,7 @@ export interface RecordPaymentInput {
   packageId?: unknown;
   /** Class-based billing: the one-time registration advance of this billing account. */
   advanceAccountId?: unknown;
-  /** Class-based billing: a monthly batch invoice. */
+  /** Class-based billing: a batch invoice (four-week cycle). */
   invoiceId?: unknown;
   /** Class-based billing: one individual session (₹750, paid separately). Exactly one target in total. */
   sessionChargeId?: unknown;

@@ -17,6 +17,7 @@ import {
   Settings,
   Star,
   Tags,
+  UserPlus,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +41,7 @@ export const TEACHER_NAV: TeacherNavItem[] = [
   { href: "/teacher/courses", label: "Courses", icon: BookOpen },
   { href: "/teacher/classes", label: "Classes", icon: CalendarClock },
   { href: "/teacher/students", label: "Students", icon: Users },
+  { href: "/teacher/enrolment-requests", label: "Enrolment requests", icon: UserPlus },
   { href: "/teacher/batches", label: "Batches", icon: Boxes },
   { href: "/teacher/billing", label: "Billing", icon: Receipt },
   { href: "/teacher/packages", label: "Packages (legacy)", icon: Package },

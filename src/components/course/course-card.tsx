@@ -77,7 +77,18 @@ export function CourseCard({ course, className }: CourseCardProps) {
         </div>
 
         <div className="mt-auto flex items-end justify-between gap-3 border-t border-border pt-4">
-          <CourseFeeLine fee={course.fee} />
+          <div className="flex flex-col gap-3">
+            <CourseFeeLine fee={course.fee} />
+            {course.availability === "open" && (
+              // Above the card's stretched link, so it is its own click target.
+              <Link
+                href={`/dashboard/enrol/${course.slug}`}
+                className="relative z-10 inline-flex h-9 items-center self-start rounded-full bg-maroon px-4 text-sm font-semibold text-cream transition-colors hover:bg-maroon-deep focus-visible:ring-3 focus-visible:ring-ring/60 focus-visible:outline-none"
+              >
+                Enrol now
+              </Link>
+            )}
+          </div>
           <span
             aria-hidden="true"
             className="flex size-10 items-center justify-center rounded-full bg-maroon-soft text-maroon transition-colors group-hover:bg-maroon group-hover:text-cream"

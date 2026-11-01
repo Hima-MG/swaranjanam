@@ -1,4 +1,4 @@
-import { BookOpen, CalendarClock, ChevronRight, MessageCircle, MonitorPlay, Users, UsersRound } from "lucide-react";
+import { BookOpen, CalendarClock, ChevronRight, MonitorPlay, Users, UsersRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
-import { siteConfig } from "@/config/site";
 import { FEE_TERMS } from "@/lib/catalog/public-pricing";
 import { getPublishedCourseBySlug, getPublishedCourses, relatedCourses } from "@/lib/catalog/server";
 import { formatMoney } from "@/lib/format";
@@ -113,20 +112,23 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
             <CourseThumbnail course={course} priority sizes="(min-width: 1024px) 380px, 100vw" />
             <div className="flex flex-col gap-5 p-6">
               <CourseFeeLine fee={course.fee} />
-              {course.fee && (
+              {course.fee?.siblingDiscount && (
                 <p className="-mt-3 text-sm text-muted-foreground">
-                  Siblings / two learners on one device: {formatMoney(course.fee.siblingBatchMinor)} per learner per batch session (
-                  {course.fee.siblingDiscountPercent}% off).
+                  Siblings / two learners on one device: {formatMoney(course.fee.siblingDiscount.batchMinor)} per learner per batch session (
+                  {course.fee.siblingDiscount.percent}% off).
                 </p>
               )}
               <div className="flex flex-col gap-3">
                 {open ? (
-                  <Button asChild size="lg" className="w-full">
-                    <a href={siteConfig.contact.whatsappUrl} target="_blank" rel="noopener noreferrer">
-                      <MessageCircle data-icon="inline-start" />
-                      Enrol on WhatsApp
-                    </a>
-                  </Button>
+                  <>
+                    <Button asChild size="lg" className="w-full">
+                      <Link href={`/dashboard/enrol/${course.slug}`}>Enrol now</Link>
+                    </Button>
+                    <p className="-mt-1 text-xs text-muted-foreground">
+                      Sign in or create a free account, choose batch or individual classes and see exactly what you pay. Nothing is charged until you are
+                      placed.
+                    </p>
+                  </>
                 ) : (
                   <p className="rounded-xl bg-cream-deep/70 p-3 text-sm text-brown">Coming soon — not yet open for enrolment.</p>
                 )}

@@ -66,6 +66,8 @@ export const COLLECTIONS = {
   legacyDues: "legacyDues",
   gatewayOrders: "gatewayOrders",
   gatewayEvents: "gatewayEvents",
+  // Website enrolment requests (see lib/lms/server/enrolment.ts).
+  enrolmentRequests: "enrolmentRequests",
 } as const;
 
 export function db() {

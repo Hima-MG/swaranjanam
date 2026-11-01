@@ -18,7 +18,6 @@ import { listAnnouncementsForStudent } from "@/lib/lms/server/announcements";
 import { getOwnBatches } from "@/lib/lms/server/batches";
 import { getOwnClassBilling } from "@/lib/lms/server/class-billing";
 import { formatMoney } from "@/lib/format";
-import { periodLabel } from "@/lib/lms/class-billing";
 import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses } from "@/lib/lms/server/classes";
 import { TestimonialPanel } from "@/components/lms/student/testimonial-panel";
@@ -95,8 +94,8 @@ async function StudentDashboard() {
             <ul className="list-disc pl-5">
               {unpaidInvoices.map((i) => (
                 <li key={i.id}>
-                  {i.courseTitle}, {periodLabel(i.period)}: {formatMoney(i.summary.balanceMinor)} — pay by {formatDate(i.deadlineAt)}
-                  {i.dueState === "overdue" ? " (deadline passed)" : ""}
+                  {i.courseTitle}, {i.label}: {formatMoney(i.summary.balanceMinor)} — pay by {formatDate(i.deadlineAt)}
+                  {i.dueState === "overdue" ? " (overdue)" : ""}
                 </li>
               ))}
               {sessionsDue.map((s) => (
@@ -135,7 +134,7 @@ async function StudentDashboard() {
               <UpcomingClasses classes={b.upcoming} serverNow={b.nowMs} />
             ) : (
               <p className="text-sm text-muted-foreground">
-                {b.suspended ? "Class links are paused until the overdue invoice is paid and verified." : "No upcoming batch classes scheduled yet."}
+                {b.blockedReason ?? "No upcoming batch classes scheduled yet."}
               </p>
             )}
           </section>

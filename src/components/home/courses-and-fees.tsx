@@ -1,13 +1,9 @@
-import { MessageCircle } from "lucide-react";
-
 import { CatalogEmpty, CatalogError } from "@/components/course/catalog-states";
 import { CourseGrid } from "@/components/course/course-grid";
 import { FeeSummary } from "@/components/course/course-fees";
-import { Button } from "@/components/ui/button";
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
 import { CLASS_DETAILS } from "@/data/approved-courses";
-import { siteConfig } from "@/config/site";
 import type { PublicCourseFees } from "@/lib/catalog/public-pricing";
 import type { CatalogResult } from "@/lib/catalog/server";
 import type { Course } from "@/types/course";
@@ -26,15 +22,7 @@ export function CoursesAndFees({ catalog, fee }: { catalog: CatalogResult<Course
         align="left"
         eyebrow="Courses & fees"
         title="Learn at your own pace, pay per class"
-        description="One-hour live classes on Google Meet, once a week, in small batches. Fees are per session and paid at the end of each month — never a course fee upfront."
-        action={
-          <Button asChild>
-            <a href={siteConfig.contact.whatsappUrl} target="_blank" rel="noopener noreferrer">
-              <MessageCircle data-icon="inline-start" />
-              Enrol on WhatsApp
-            </a>
-          </Button>
-        }
+        description="One-hour live classes on Google Meet, once a week, in small batches. Fees are per session: your first batch class is paid when you enrol, then you are invoiced every four weeks for the classes held — never a course fee upfront. Choose an open course and select “Enrol now”."
       />
 
       {fee && <FeeSummary fee={fee} className="mb-12" />}

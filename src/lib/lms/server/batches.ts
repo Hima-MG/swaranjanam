@@ -5,18 +5,20 @@ import { FieldValue, Timestamp, type DocumentData, type DocumentSnapshot } from 
 import type { SessionUser } from "@/lib/auth/session";
 import {
   accountIdFor,
+  BATCH_BLOCK_MESSAGES,
+  batchClassBlock,
   batchMemberId,
+  type BillingMode,
   canAddMember,
   initialAdvance,
   MAX_BATCH_CAPACITY,
   membershipLockId,
   periodOf,
   rateVersionForPeriod,
-  type BillingMode,
 } from "@/lib/lms/class-billing";
 import { toStudentView, type LiveClassRecord, type StudentClassView } from "@/lib/lms/classes";
 import { AccessError } from "@/lib/lms/server/access";
-import { assertLegacyDuesClearedInTx, classBillingConfigRef, mapAccount, mapConfig, suspendedCourseIds } from "@/lib/lms/server/class-billing";
+import { assertLegacyDuesClearedInTx, classBillingConfigRef, mapAccount, mapConfig } from "@/lib/lms/server/class-billing";
 import { mapLiveClass } from "@/lib/lms/server/classes";
 import { col, db, mapEnrollment, toIso } from "@/lib/lms/server/db";
 import { enrollmentId } from "@/lib/lms/types";
@@ -353,24 +355,37 @@ export async function getOwnBatches(user: SessionUser) {
   if (active.length === 0) return [];
   const batches = (await db().getAll(...active.map((m) => col("batches").doc(m.batchId)))).map(mapBatch).filter((b): b is BatchRecord => b !== null);
   const nowMs = Date.now();
-  const [classesSnap, suspended] = await Promise.all([col("liveClasses").where("studentId", "==", user.uid).get(), suspendedCourseIds(user.uid)]);
+  const [classesSnap, accounts] = await Promise.all([
+    col("liveClasses").where("studentId", "==", user.uid).get(),
+    db().getAll(...active.map((m) => col("billingAccounts").doc(m.accountId))),
+  ]);
+  const blockByBatch = new Map(
+    active.map((m, i) => {
+      const account = mapAccount(accounts[i]);
+      return [m.batchId, account && account.studentId === user.uid ? batchClassBlock(account) : null] as const;
+    }),
+  );
   const own = classesSnap.docs.map(mapLiveClass).filter((c): c is LiveClassRecord => c !== null && c.studentId === user.uid);
-  return batches.map((b) => ({
-    id: b.id,
-    name: b.name,
-    courseTitle: b.courseTitle,
-    teacherName: b.teacherName,
-    schedule: b.schedule,
-    // Suspended for an unpaid invoice past its deadline: no Meet link or join buttons (reversible).
-    suspended: suspended.has(b.courseId),
-    meetUrl: suspended.has(b.courseId) ? null : b.meetUrl,
-    upcoming: suspended.has(b.courseId) ? [] : own
-      .filter((c) => c.batchId === b.id && c.status === "scheduled" && Date.parse(c.endAt) >= nowMs)
-      .sort((x, y) => x.startAt.localeCompare(y.startAt))
-      .slice(0, 5)
-      .map((c): StudentClassView => toStudentView(c, b.teacherName, nowMs)),
-    nowMs,
-  }));
+  return batches.map((b) => {
+    // Unpaid invoice past its due date, or first-class payment not verified: no Meet link or join buttons (reversible).
+    const block = blockByBatch.get(b.id) ?? null;
+    return {
+      id: b.id,
+      name: b.name,
+      courseTitle: b.courseTitle,
+      teacherName: b.teacherName,
+      schedule: b.schedule,
+      suspended: block === "suspended",
+      blockedReason: block ? BATCH_BLOCK_MESSAGES[block] : null,
+      meetUrl: block ? null : b.meetUrl,
+      upcoming: block ? [] : own
+        .filter((c) => c.batchId === b.id && c.status === "scheduled" && Date.parse(c.endAt) >= nowMs)
+        .sort((x, y) => x.startAt.localeCompare(y.startAt))
+        .slice(0, 5)
+        .map((c): StudentClassView => toStudentView(c, b.teacherName, nowMs)),
+      nowMs,
+    };
+  });
 }
 
 export async function listTeachers(user: SessionUser) {

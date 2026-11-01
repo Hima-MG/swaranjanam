@@ -8,7 +8,7 @@ import { TeacherPageHeader } from "@/components/lms/teacher/teacher-page-header"
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
-import { BILLING_START_PERIOD, GRACE_DAYS, nextPeriod, PENDING_DECISIONS, periodLabel, periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
+import { BILLING_START_PERIOD, nextPeriod, PENDING_DECISIONS, periodLabel, periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
 import { getClassBillingConfig } from "@/lib/lms/server/class-billing";
 import { onlinePaymentsStatus } from "@/lib/payments/razorpay";
 
@@ -32,14 +32,16 @@ async function Settings() {
         <h2 id="rules" className="type-h3">Confirmed rules</h2>
         <ul className="list-disc pl-5">
           <li>Website billing starts with {periodLabel(BILLING_START_PERIOD)}; earlier fees stay with the previous payment method, and old dues must be verified for each student first.</li>
-          <li>Batch classes: per class per student, invoiced once a month. Attended and absent are billed; academy-cancelled, rescheduled and unknown-attendance classes are not.</li>
+          <li>Batch classes: per class per student. Attended and absent are billed; academy-cancelled, rescheduled and unknown-attendance classes are not.</li>
           <li>
-            One-time enrolment advance, <strong>non-refundable</strong>, applied to the first monthly invoice after it is verified; any unused part is carried forward. It is not
-            refunded if a student stops early.
+            First-class payment, collected at enrolment and <strong>non-refundable</strong>: it pays for the student&apos;s first eligible class, which is never invoiced.
+            The first class&apos;s Meet link is withheld until it is verified. It is not refunded if a student stops early.
           </li>
           <li>
-            Invoices are due at the end of the month, with a {GRACE_DAYS}-day grace period (payment deadline: the {GRACE_DAYS}th of the next month, 11:59:59 PM IST). Unpaid after the
-            deadline → access paused until the payment is verified.
+            Four-week cycles from the date of the first class (week 1). Cycle 1 covers classes 2–4 (₹1,200 when all three take place), later cycles four classes
+            (₹1,600) — always only the classes actually held. Each invoice is issued once a class in the cycle&apos;s fourth week is recorded (or at the end of
+            week 4 at the latest) and is due at the end of week 4, 8, 12 … (IST). Unpaid after that → Meet links, lessons and materials pause until the payment
+            is verified.
           </li>
           <li>Individual sessions: paid per session. Cancelled by the student at least 24 hours before → no charge; later → still payable. Academy cancellation → no charge.</li>
         </ul>
