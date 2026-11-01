@@ -1,8 +1,10 @@
 import {
+  COURSE_AVAILABILITY,
   COURSE_CATEGORIES,
   COURSE_FORMATS,
   COURSE_LEVELS,
   COURSE_TAGS,
+  type CourseAvailability,
   type CourseCategory,
   type CourseFormat,
   type CourseLevel,
@@ -103,12 +105,18 @@ export interface CatalogInput {
   duration: string;
   ageGroup: string;
   instructor: string;
-  price: number | null;
-  originalPrice: number | null;
+  /**
+   * Legacy catalogue price fields. No longer edited in the form or shown
+   * anywhere; undefined (not sent) leaves the stored value unchanged.
+   */
+  price?: number | null;
+  originalPrice?: number | null;
   tag: CourseTag | null;
   featured: boolean;
   outcomes: string[];
   outcomesMl: string[];
+  /** Public enrolment status; null = not listed publicly. */
+  availability: CourseAvailability | null;
   /** Requested slug; empty means "keep the current one". */
   slug: string;
 }
@@ -138,8 +146,11 @@ export function parseCatalogInput(input: Record<string, unknown>): { value: Cata
   const category = choice(COURSE_CATEGORIES, input.category);
   const format = choice(COURSE_FORMATS, input.format);
   const tag = choice(COURSE_TAGS, input.tag);
-  const price = rupees(input.price);
-  const originalPrice = rupees(input.originalPrice);
+  const availability = choice(COURSE_AVAILABILITY, input.availability);
+  // Legacy fields: validated only when a caller still sends them.
+  const sendsPrices = "price" in input || "originalPrice" in input;
+  const price = sendsPrices ? rupees(input.price) : null;
+  const originalPrice = sendsPrices ? rupees(input.originalPrice) : null;
   const outcomes = lines(input.outcomes);
   const outcomesMl = lines(input.outcomesMl);
   const slug = cleanText(input.slug, LIMITS.slug).toLowerCase();
@@ -148,6 +159,7 @@ export function parseCatalogInput(input: Record<string, unknown>): { value: Cata
   if (category === undefined) errors.category = "Choose a category from the list.";
   if (format === undefined) errors.format = "Choose a format from the list.";
   if (tag === undefined) errors.tag = "Choose a label from the list.";
+  if (availability === undefined) errors.availability = "Choose an enrolment status from the list.";
   if (price === undefined) errors.price = "Enter the fee in whole rupees, or leave it empty.";
   if (originalPrice === undefined) errors.originalPrice = "Enter the original fee in whole rupees, or leave it empty.";
   if (price != null && originalPrice != null && originalPrice <= price) {
@@ -170,12 +182,12 @@ export function parseCatalogInput(input: Record<string, unknown>): { value: Cata
       duration: cleanText(input.duration, CATALOG_LIMITS.shortText),
       ageGroup: cleanText(input.ageGroup, CATALOG_LIMITS.shortText),
       instructor: cleanText(input.instructor, CATALOG_LIMITS.instructor),
-      price: price ?? null,
-      originalPrice: originalPrice ?? null,
+      ...(sendsPrices ? { price: price ?? null, originalPrice: originalPrice ?? null } : {}),
       tag: tag ?? null,
       featured: input.featured === true || input.featured === "on",
       outcomes: outcomes.slice(0, CATALOG_LIMITS.outcomes),
       outcomesMl: outcomesMl.slice(0, CATALOG_LIMITS.outcomes),
+      availability: availability ?? null,
       slug,
     },
     errors,

@@ -35,33 +35,33 @@ export const features: Feature[] = [
   },
   {
     icon: Laptop,
-    title: "Live & Recorded Classes",
+    title: "Live Online Classes",
     description:
-      "Attend live interactive sessions and revisit recorded lessons whenever you need to practise.",
+      "One-hour live classes on Google Meet, once a week. Every class is recorded and shared privately with you to practise from.",
   },
   {
     icon: Users,
     title: "Small Batches",
     description:
-      "Intimate batch sizes ensure every student receives individual attention and correction.",
+      "Batches of up to five students, so every student receives individual attention and correction.",
   },
   {
     icon: CalendarDays,
-    title: "Flexible Schedules",
+    title: "For India & Abroad",
     description:
-      "Morning, evening and weekend batches across time zones for students in India and abroad.",
+      "Classes on any day except Sunday, with batch timings fixed to suit students in India and abroad.",
   },
   {
     icon: Award,
-    title: "Structured Progression",
+    title: "Your Own Pace",
     description:
-      "A clear path from Sarali Varisai to kritis and manodharma, with regular assessments.",
+      "No fixed course duration: step by step through varisais and alankarams, with notations, lyrics and practice widgets on your dashboard.",
   },
   {
     icon: HeartHandshake,
     title: "For Every Age",
     description:
-      "Dedicated programmes for children, adults and families who want to sing together.",
+      "Swara Foundation for adults and Little Swaras for kids — siblings learning together get 10% off.",
   },
 ];
 
@@ -91,18 +91,18 @@ export const journey: JourneyStep[] = [
 export const learningModes: Feature[] = [
   {
     icon: Video,
-    title: "Live Online",
-    description: "Real-time classes with personal correction from your teacher.",
-  },
-  {
-    icon: Music,
-    title: "Recorded Lessons",
-    description: "Learn at your own pace and replay lessons as often as you like.",
+    title: "Live on Google Meet",
+    description: "One-hour classes, once a week, with personal correction from your teacher.",
   },
   {
     icon: Users,
-    title: "Hybrid",
-    description: "Recorded lessons combined with weekly live review sessions.",
+    title: "Batch or Individual",
+    description: "Small batches of up to five students, or one-to-one individual classes.",
+  },
+  {
+    icon: Music,
+    title: "Recordings & Materials",
+    description: "Private class recordings, notations, lyrics and practice widgets on your student dashboard.",
   },
 ];
 

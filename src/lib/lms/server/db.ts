@@ -4,6 +4,7 @@ import { Timestamp, type DocumentData, type DocumentSnapshot } from "firebase-ad
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import {
+  COURSE_AVAILABILITY,
   COURSE_CATEGORIES,
   COURSE_FORMATS,
   COURSE_LEVELS,
@@ -123,6 +124,7 @@ export function mapCatalogFields(data: DocumentData): CourseCatalogFields {
     featured: data.featured === true,
     outcomes: strings(data.outcomes),
     outcomesMl: strings(data.outcomesMl),
+    availability: oneOfOrNull(COURSE_AVAILABILITY, data.availability),
   };
 }
 

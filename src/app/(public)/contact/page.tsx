@@ -12,7 +12,7 @@ import { getPublishedCourses } from "@/lib/catalog/server";
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Get in touch with Swaraanjanam to book a free trial class or ask about our courses.",
+  description: "Get in touch with Swaraanjanam to enrol or ask about our courses, batches and fees.",
 };
 
 const { contact, social } = siteConfig;
@@ -58,7 +58,7 @@ export default function ContactPage() {
       <PageHero
         eyebrow="Contact us"
         title="Let's begin your musical journey"
-        description="Book a free trial class, ask about batches and fees, or simply say namaste. We usually reply within one working day."
+        description="Ask about enrolment, batches and fees, or simply say namaste. We usually reply within one working day."
       />
       <Section>
         <div className="grid gap-10 lg:grid-cols-[1fr_1.4fr] lg:gap-14">

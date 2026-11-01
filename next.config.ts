@@ -19,6 +19,8 @@ const nextConfig: NextConfig = {
   async redirects() {
     // The teacher area used to live at /admin.
     return [
+      // Courses and fees live in one section of the homepage; course pages stay at /courses/<slug>.
+      { source: "/courses", destination: "/#courses", permanent: false },
       { source: "/admin", destination: "/teacher", permanent: false },
       { source: "/admin/:path*", destination: "/teacher", permanent: false },
     ];

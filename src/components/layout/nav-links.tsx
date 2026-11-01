@@ -14,6 +14,8 @@ interface NavLinksProps {
 }
 
 function isActive(pathname: string, href: string) {
+  // Homepage sections (/#courses, /#faq): "Courses & Fees" stays active on course pages.
+  if (href.startsWith("/#")) return href === "/#courses" && pathname.startsWith("/courses/");
   return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 }
 

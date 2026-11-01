@@ -2,92 +2,69 @@ import "server-only";
 
 import { cacheLife, cacheTag } from "next/cache";
 
-import { planForCourse, publicFeeFromPlan } from "@/lib/catalog/public-fees";
-import type { PricePlan } from "@/lib/lms/billing";
-import { listPlans } from "@/lib/lms/server/billing";
+import { APPROVED_COURSES } from "@/data/approved-courses";
+import { buildPublicCatalog, fromApproved, fromFirestore } from "@/lib/catalog/public-catalog";
+import { publicFeesFromRate, type PublicCourseFees } from "@/lib/catalog/public-pricing";
+import { periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
+import { getClassBillingConfig } from "@/lib/lms/server/class-billing";
 import { col, mapCourse, readLessons, readModules } from "@/lib/lms/server/db";
 import type { CourseRecord } from "@/lib/lms/types";
-import type { Course, CourseCategory, CourseDetail, CourseTone } from "@/types/course";
+import type { Course, CourseCategory, CourseDetail } from "@/types/course";
 
-// Public course catalogue, read from Firestore (the single source of truth).
+// Public course catalogue (homepage "Courses & fees" section and course pages).
 //
-// * Only `status == "published"` courses are ever returned.
+// * Courses: published Firestore courses whose availability a teacher has set,
+//   plus the academy's approved catalogue for any approved course that does
+//   not exist in Firestore yet (lib/catalog/public-catalog.ts).
+// * Fees: the academy's per-session billing rates in force
+//   (settings/classBilling, Teacher → Billing → Rates & policy) — the same
+//   rates monthly invoices use. Never the legacy course.price, never legacy
+//   package plans, never a student's agreed fee.
 // * Only catalogue fields and module/lesson TITLES leave this module — never
-//   lesson resources, teacher ids or enrollment data.
-// * Fees come only from the published fee plan linked to the course
-//   (pricePlans.courseId), never from the legacy course.price field. Fee-plan
-//   edits also call updateTag(CATALOG_TAG).
-// * Results are cached ("use cache") under CATALOG_TAG. Every teacher
-//   mutation that can change public content calls updateTag(CATALOG_TAG), so
-//   edits, publishing and unpublishing show up immediately.
+//   lesson resources, teacher ids, enrolments or payments.
+// * Results are cached ("use cache") under CATALOG_TAG. Teacher mutations
+//   that change public content (courses, rates) call updateTag(CATALOG_TAG).
 
 export const CATALOG_TAG = "catalog";
 
 export type CatalogResult<T> = { ok: true; data: T } | { ok: false };
 
-const TONES: CourseTone[] = ["maroon", "gold", "brown", "rose"];
-
-/** Stable placeholder colour per course (no stored styling needed). */
-function toneFor(id: string): CourseTone {
-  let hash = 0;
-  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return TONES[hash % TONES.length];
-}
-
-function toPublicCourse(course: CourseRecord, moduleCount: number, lessonCount: number, plans: readonly PricePlan[]): Course {
-  return {
-    id: course.id,
-    slug: course.slug,
-    title: course.title,
-    titleMl: course.titleMl,
-    subtitle: course.subtitle,
-    subtitleMl: course.subtitleMl,
-    description: course.description,
-    descriptionMl: course.descriptionMl,
-    thumbnailUrl: course.thumbnailUrl,
-    level: course.level,
-    category: course.category,
-    format: course.format,
-    duration: course.duration,
-    ageGroup: course.ageGroup,
-    instructor: course.instructor,
-    fee: publicFeeFromPlan(planForCourse(plans, course.id)),
-    tag: course.tag,
-    featured: course.featured,
-    outcomes: course.outcomes,
-    outcomesMl: course.outcomesMl,
-    moduleCount,
-    lessonCount,
-    tone: toneFor(course.id),
-  };
-}
-
 function logFailure(label: string, error: unknown) {
   console.error(`[catalog] ${label} failed:`, (error as Error)?.name, (error as Error)?.message);
 }
 
-async function readPublishedCourses(): Promise<Course[]> {
-  const [snapshot, plans] = await Promise.all([col("courses").where("status", "==", "published").get(), listPlans()]);
-  const courses = snapshot.docs.map(mapCourse).filter((c): c is CourseRecord => c !== null);
-  const withCounts = await Promise.all(
-    courses.map(async (course) => {
-      const [modules, lessons] = await Promise.all([
-        col("modules").where("courseId", "==", course.id).count().get(),
-        col("lessons").where("courseId", "==", course.id).count().get(),
-      ]);
-      return toPublicCourse(course, modules.data().count, lessons.data().count, plans);
-    }),
-  );
-  // Featured first, then alphabetical: a stable order teachers can influence.
-  return withCounts.sort((a, b) => Number(b.featured) - Number(a.featured) || a.title.localeCompare(b.title));
+/** The per-session fees in force this month (IST), from the billing rates. */
+async function currentPublicFees(): Promise<PublicCourseFees> {
+  const config = await getClassBillingConfig();
+  return publicFeesFromRate(rateVersionForPeriod(config.rateVersions, periodOf(new Date().toISOString())));
 }
 
-/** All published courses. On failure returns `{ ok: false }`, cached only briefly. */
+async function readCatalog(): Promise<Course[]> {
+  const [published, slugs, fees] = await Promise.all([
+    col("courses").where("status", "==", "published").get(),
+    col("courses").select("slug").get(),
+    currentPublicFees(),
+  ]);
+  const courses = published.docs.map(mapCourse).filter((c): c is CourseRecord => c !== null && c.availability !== null);
+  const firestore = await Promise.all(
+    courses.map(async (record) => {
+      const [modules, lessons] = await Promise.all([
+        col("modules").where("courseId", "==", record.id).count().get(),
+        col("lessons").where("courseId", "==", record.id).count().get(),
+      ]);
+      return { record, moduleCount: modules.data().count, lessonCount: lessons.data().count };
+    }),
+  );
+  const knownSlugs = new Set(slugs.docs.map((d) => (typeof d.get("slug") === "string" && d.get("slug")) || d.id));
+  return buildPublicCatalog({ firestore, knownSlugs, approved: APPROVED_COURSES, fees });
+}
+
+/** Every publicly listed course. On failure returns `{ ok: false }`, cached only briefly. */
 export async function getPublishedCourses(): Promise<CatalogResult<Course[]>> {
   "use cache";
   cacheTag(CATALOG_TAG);
   try {
-    const data = await readPublishedCourses();
+    const data = await readCatalog();
     cacheLife("hours");
     return { ok: true, data };
   } catch (error) {
@@ -97,9 +74,24 @@ export async function getPublishedCourses(): Promise<CatalogResult<Course[]>> {
   }
 }
 
+/** Current per-session fees for the homepage fee summary. Null when they cannot be loaded. */
+export async function getPublicFees(): Promise<PublicCourseFees | null> {
+  "use cache";
+  cacheTag(CATALOG_TAG);
+  try {
+    const fees = await currentPublicFees();
+    cacheLife("hours");
+    return fees;
+  } catch (error) {
+    logFailure("getPublicFees", error);
+    cacheLife("seconds");
+    return null;
+  }
+}
+
 const SLUG_PATTERN = /^[a-z0-9-]{1,80}$/;
 
-/** A published course with its public curriculum outline, or `data: null` if none matches. */
+/** A publicly listed course with its curriculum outline, or `data: null` if none matches. */
 export async function getPublishedCourseBySlug(slug: string): Promise<CatalogResult<CourseDetail | null>> {
   "use cache";
   cacheTag(CATALOG_TAG);
@@ -108,17 +100,19 @@ export async function getPublishedCourseBySlug(slug: string): Promise<CatalogRes
     return { ok: true, data: null };
   }
   try {
-    const snapshot = await col("courses")
-      .where("slug", "==", slug)
-      .where("status", "==", "published")
-      .limit(1)
-      .get();
-    const course = snapshot.empty ? null : mapCourse(snapshot.docs[0]);
-    if (!course) {
+    const [snapshot, fees] = await Promise.all([col("courses").where("slug", "==", slug).limit(1).get(), currentPublicFees()]);
+    if (snapshot.empty) {
+      // Not in Firestore: the approved catalogue entry, if any.
+      const approved = APPROVED_COURSES.find((a) => a.slug === slug);
+      cacheLife("hours");
+      return { ok: true, data: approved ? { ...fromApproved(approved, fees), curriculum: [] } : null };
+    }
+    const course = mapCourse(snapshot.docs[0]);
+    if (!course || course.status !== "published" || !course.availability) {
       cacheLife("hours");
       return { ok: true, data: null };
     }
-    const [modules, lessons, plans] = await Promise.all([readModules(course.id), readLessons(course.id), listPlans()]);
+    const [modules, lessons] = await Promise.all([readModules(course.id), readLessons(course.id)]);
     const curriculum = modules.map((module) => ({
       title: module.title,
       titleMl: module.titleMl,
@@ -126,8 +120,9 @@ export async function getPublishedCourseBySlug(slug: string): Promise<CatalogRes
         .filter((lesson) => lesson.moduleId === module.id)
         .map((lesson) => ({ title: lesson.title, titleMl: lesson.titleMl })),
     }));
+    const publicCourse = fromFirestore({ record: course, moduleCount: modules.length, lessonCount: lessons.length }, fees);
     cacheLife("hours");
-    return { ok: true, data: { ...toPublicCourse(course, modules.length, lessons.length, plans), curriculum } };
+    return { ok: true, data: publicCourse ? { ...publicCourse, curriculum } : null };
   } catch (error) {
     logFailure("getPublishedCourseBySlug", error);
     cacheLife("seconds");
@@ -137,9 +132,8 @@ export async function getPublishedCourseBySlug(slug: string): Promise<CatalogRes
 
 // --- Pure helpers over a loaded catalogue ----------------------------------------
 
-export function featuredCourses(courses: Course[], limit = 4): Course[] {
-  const featured = courses.filter((c) => c.featured);
-  return (featured.length > 0 ? featured : courses).slice(0, limit);
+export function openCourses(courses: Course[], limit = 4): Course[] {
+  return courses.filter((c) => c.availability === "open").slice(0, limit);
 }
 
 export function relatedCourses(courses: Course[], course: Pick<Course, "slug" | "category">, limit = 3): Course[] {

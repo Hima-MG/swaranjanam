@@ -1,8 +1,9 @@
 "use server";
 
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { refresh } from "next/cache";
+import { refresh, updateTag } from "next/cache";
 
+import { CATALOG_TAG } from "@/lib/catalog/server";
 import { paiseToRupeesText, parseRupees } from "@/lib/lms/billing";
 import {
   accountIdFor,
@@ -296,6 +297,8 @@ export async function addRateVersion(input: Record<string, unknown>): Promise<Ac
       return nextId;
     });
     await writeAudit(user, { action: "billing.rate", targetType: "settings", targetId: "classBilling", summary: `Added rate version ${id} from ${periodLabel(effectiveFrom)}` });
+    // Public course fees are derived from the rates in force.
+    updateTag(CATALOG_TAG);
     refresh();
     return null;
   });

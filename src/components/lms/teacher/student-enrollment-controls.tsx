@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/loading-state";
 import { NativeSelect } from "@/components/ui/native-select";
-import { formatINR } from "@/lib/format";
 
 export function EnrollInCourseForm({
   studentId,
@@ -62,8 +61,7 @@ export function EnrollInCourseForm({
       </div>
       {selected && (
         <p className="text-xs text-muted-foreground">
-          Agreed fee will be recorded as {selected.price === null ? "not set (no listed fee)" : formatINR(selected.price)}, the
-          course’s current fee. You can adjust it later.
+          No fee is recorded on the enrolment. Course fees are billed per session through the student&apos;s billing account (Billing).
         </p>
       )}
       {error && <FormAlert tone="error">{error}</FormAlert>}

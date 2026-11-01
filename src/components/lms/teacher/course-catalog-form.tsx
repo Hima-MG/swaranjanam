@@ -11,7 +11,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import type { CourseRecord } from "@/lib/lms/types";
 import { CATALOG_LIMITS, LIMITS } from "@/lib/lms/validation";
-import { COURSE_CATEGORIES, COURSE_FORMATS, COURSE_LEVELS, COURSE_TAGS } from "@/types/course";
+import { COURSE_AVAILABILITY, COURSE_AVAILABILITY_LABELS, COURSE_CATEGORIES, COURSE_FORMATS, COURSE_LEVELS, COURSE_TAGS } from "@/types/course";
 
 function Field({
   id,
@@ -81,7 +81,7 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
         const input = Object.fromEntries(
           [
             "slug", "subtitle", "subtitleMl", "level", "category", "format", "tag",
-            "duration", "ageGroup", "instructor", "price", "originalPrice", "outcomes", "outcomesMl",
+            "duration", "ageGroup", "instructor", "availability", "outcomes", "outcomesMl",
           ].map((key) => [key, String(data.get(key) ?? "")]),
         );
         run(() => updateCourseCatalog(course.id, { ...input, featured: data.get("featured") === "on" }), {
@@ -138,10 +138,10 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
         </div>
 
         <div className="grid gap-5 sm:grid-cols-3">
-          <Field id="catalog-duration" label="Duration" hint="e.g. 12 weeks" error={e.duration}>
+          <Field id="catalog-duration" label="Duration (internal)" hint="Not shown publicly: courses have no fixed duration." error={e.duration}>
             <Input id="catalog-duration" name="duration" defaultValue={course.duration} maxLength={CATALOG_LIMITS.shortText} />
           </Field>
-          <Field id="catalog-ageGroup" label="Age group" hint="e.g. 10 years & above" error={e.ageGroup}>
+          <Field id="catalog-ageGroup" label="Who it's for" hint="e.g. Beginners – adults" error={e.ageGroup}>
             <Input id="catalog-ageGroup" name="ageGroup" defaultValue={course.ageGroup} maxLength={CATALOG_LIMITS.shortText} />
           </Field>
           <Field id="catalog-instructor" label="Instructor" error={e.instructor}>
@@ -149,18 +149,26 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
           </Field>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-3 sm:items-start">
-          <Field id="catalog-price" label="Fee (₹)" hint="Whole rupees. Used only as the agreed fee for direct course enrollments. The public website shows fees from Fees & pricing (the plan linked to this course)." error={e.price}>
-            <Input id="catalog-price" name="price" inputMode="numeric" defaultValue={course.price ?? ""} aria-invalid={e.price ? true : undefined} />
-          </Field>
-          <Field id="catalog-originalPrice" label="Original fee (₹)" hint="Optional. No longer shown on the public website." error={e.originalPrice}>
-            <Input
-              id="catalog-originalPrice"
-              name="originalPrice"
-              inputMode="numeric"
-              defaultValue={course.originalPrice ?? ""}
-              aria-invalid={e.originalPrice ? true : undefined}
-            />
+        <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-start">
+          <Field
+            id="catalog-availability"
+            label="Enrolment & public fees"
+            hint="Open: the course shows the academy's current per-session fees (set in Billing → Rates & policy). Coming soon: “Fees to be announced”. Not listed: hidden from the public website even when published."
+            error={e.availability}
+          >
+            <NativeSelect
+              id="catalog-availability"
+              name="availability"
+              defaultValue={course.availability ?? ""}
+              aria-invalid={e.availability ? true : undefined}
+            >
+              <option value="">Not listed publicly</option>
+              {COURSE_AVAILABILITY.map((option) => (
+                <option key={option} value={option}>
+                  {COURSE_AVAILABILITY_LABELS[option]}
+                </option>
+              ))}
+            </NativeSelect>
           </Field>
           <div className="flex items-start gap-3 pt-8">
             <input
@@ -171,7 +179,7 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
               className="mt-0.5 size-4 accent-maroon"
             />
             <Label htmlFor="catalog-featured" className="text-sm leading-snug font-normal text-brown">
-              Feature on the home page
+              Show near the top of the home page list
             </Label>
           </div>
         </div>
