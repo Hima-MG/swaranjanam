@@ -1,10 +1,10 @@
 import "server-only";
 
-import type { DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
+import type { DocumentData, DocumentReference, DocumentSnapshot, Transaction } from "firebase-admin/firestore";
 
 import type { SessionUser } from "@/lib/auth/session";
-import { BATCH_BLOCK_MESSAGES, batchClassBlock } from "@/lib/lms/class-billing";
-import { mapAccount } from "@/lib/lms/server/class-billing";
+import { CLASS_BLOCK_MESSAGES, classAccessBlock } from "@/lib/lms/class-billing";
+import { enforceOverdueForStudent, mapAccount } from "@/lib/lms/server/class-billing";
 import { col, db, toIso } from "@/lib/lms/server/db";
 import {
   ACADEMY_TIME_ZONE,
@@ -17,6 +17,7 @@ import {
   type LiveClassRecord,
   type StudentClassView,
 } from "@/lib/lms/classes";
+import { isValidVideoId } from "@/lib/lms/recordings";
 import { isValidId } from "@/lib/lms/validation";
 
 // Live classes (Google Meet). Collection: liveClasses/{autoId}.
@@ -56,6 +57,7 @@ export function mapLiveClass(snapshot: DocumentSnapshot<DocumentData>): LiveClas
     attendance: ((ATTENDANCE_VALUES as readonly string[]).includes(d.attendance) ? d.attendance : null) as Attendance | null,
     outcomeNote: str(d.outcomeNote),
     outcomeRecordedAt: toIso(d.outcomeRecordedAt),
+    recordingVideoId: isValidVideoId(d.recordingVideoId) ? d.recordingVideoId : null,
     createdBy: str(d.createdBy),
     createdByEmail: str(d.createdByEmail),
     createdAt: toIso(d.createdAt),
@@ -63,6 +65,18 @@ export function mapLiveClass(snapshot: DocumentSnapshot<DocumentData>): LiveClas
     updatedByEmail: str(d.updatedByEmail),
     updatedAt: toIso(d.updatedAt),
   };
+}
+
+/** All class records of one session (pair and batch sessions have one per learner). */
+export async function sessionSiblings(tx: Transaction, record: LiveClassRecord) {
+  if ((!record.packageId && !record.batchId) || !record.sessionKey) return [{ ref: col("liveClasses").doc(record.id), record }];
+  const snap = await tx.get(col("liveClasses").where("sessionKey", "==", record.sessionKey));
+  return snap.docs
+    .map((d) => ({ ref: d.ref as DocumentReference, record: mapLiveClass(d) }))
+    .filter(
+      (s): s is { ref: DocumentReference; record: LiveClassRecord } =>
+        s.record !== null && s.record.packageId === record.packageId && s.record.batchId === record.batchId,
+    );
 }
 
 // --- Teacher ------------------------------------------------------------------------
@@ -175,15 +189,17 @@ const RECENT_DAYS = 14;
 export async function listOwnClasses(user: SessionUser): Promise<{ classes: StudentClassView[]; nowMs: number }> {
   const nowMs = Date.now();
   if (user.role !== "student") return { classes: [], nowMs };
+  // An invoice past its payment deadline suspends access now, not only at the next scheduled run.
+  await enforceOverdueForStudent(user.uid, nowMs);
   const [snapshot, accountsSnap] = await Promise.all([
     col("liveClasses").where("studentId", "==", user.uid).get(),
     col("billingAccounts").where("studentId", "==", user.uid).get(),
   ]);
-  // Batch accounts that may not join the next class: an invoice unpaid past its due date
+  // Accounts (batch or individual) that may not join the next class: an invoice unpaid past its payment deadline
   // (suspension) or the first-class payment not yet verified. No Meet links (reversible).
   const blockedAccounts = new Map(
     accountsSnap.docs
-      .map((d) => [d.id, batchClassBlock(mapAccount(d) ?? { mode: "individual", status: "closed", advance: { status: "not_required" }, suspension: { active: false } })] as const)
+      .map((d) => [d.id, classAccessBlock(mapAccount(d) ?? { mode: "individual", status: "closed", advance: { status: "not_required" }, suspension: { active: false } })] as const)
       .filter((entry): entry is readonly [string, "suspended" | "first_class_unpaid"] => entry[1] !== null),
   );
   const cutoff = nowMs - RECENT_DAYS * 24 * 60 * 60 * 1000;
@@ -200,7 +216,7 @@ export async function listOwnClasses(user: SessionUser): Promise<{ classes: Stud
     .map((c) => {
       const view = toStudentView(c, (c.createdBy && teacherName.get(c.createdBy)) || "Swaraanjanam Academy", nowMs);
       const block = c.billingAccountId ? blockedAccounts.get(c.billingAccountId) : undefined;
-      return block ? { ...view, meetUrl: null, blockedReason: BATCH_BLOCK_MESSAGES[block] } : view;
+      return block ? { ...view, meetUrl: null, blockedReason: CLASS_BLOCK_MESSAGES[block] } : view;
     })
     .sort((a, b) => {
       // Not-yet-ended first (soonest first), then past ones (most recent first).

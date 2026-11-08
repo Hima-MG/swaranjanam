@@ -1,7 +1,9 @@
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 
+import { setClassRecording } from "@/app/(account)/teacher/class-actions";
 import { CancelClassDialog, ClassFormDialog, RecordOutcomeDialog, type SchedulablePackage } from "@/components/lms/teacher/class-controls";
+import { RecordingDialog } from "@/components/lms/teacher/recording-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
@@ -20,6 +22,7 @@ export function ClassListItem({
   packages?: SchedulablePackage[];
 }) {
   const when = formatClassTime(c.startAt, c.endAt);
+  const recordable = c.status === "completed" || (c.status === "cancelled" && c.cancelKind === "student");
   return (
     <li className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-soft lg:flex-row lg:items-start lg:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
@@ -29,6 +32,7 @@ export function ClassListItem({
             {CLASS_STATUS_LABELS[c.status]}
           </Badge>
           {c.needsOutcome && <Badge variant="outline">Ended — outcome not recorded</Badge>}
+          {recordable && <Badge variant={c.recordingVideoId ? "secondary" : "outline"}>{c.recordingVideoId ? "Recording added" : "No recording"}</Badge>}
           {c.batchId && (
             <Link href={`/teacher/batches/${c.batchId}`} className="text-xs font-semibold text-maroon hover:underline">
               Batch class
@@ -71,6 +75,9 @@ export function ClassListItem({
             {c.started && <RecordOutcomeDialog classId={c.id} title={c.title} packageLinked={Boolean(c.packageId)} />}
             <CancelClassDialog classId={c.id} title={c.title} when={when} shared={Boolean(c.batchId || c.packageId)} />
           </>
+        )}
+        {recordable && (
+          <RecordingDialog id={c.id} title={`${c.title} (${c.date})`} currentVideoId={c.recordingVideoId} save={setClassRecording.bind(null, c.id)} />
         )}
       </div>
     </li>

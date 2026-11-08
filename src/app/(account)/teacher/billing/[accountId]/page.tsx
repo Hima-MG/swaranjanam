@@ -14,16 +14,17 @@ import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import {
   ADVANCE_STATUS_LABELS,
-  BATCH_BLOCK_MESSAGES,
-  batchClassBlock,
+  CLASS_BLOCK_MESSAGES,
+  classAccessBlock,
   BILLING_MODE_LABELS,
   CLASS_OUTCOME_LABELS,
-  cycleCheckpoint,
-  cycleOf,
-  cycleWeeksLabel,
   INVOICE_ADJUSTMENT_LABELS,
+  lastDayOf,
   LEGACY_DUES_LABELS,
+  monthlyPaymentDeadline,
+  paymentPurposeLabel,
   periodLabel,
+  periodOf,
   SESSION_CHARGE_LABELS,
 } from "@/lib/lms/class-billing";
 import { getBillingSettings } from "@/lib/lms/server/billing";
@@ -34,7 +35,7 @@ export const metadata: Metadata = { title: "Billing account · Teacher" };
 
 type Params = PageProps<"/teacher/billing/[accountId]">["params"];
 
-const DUE_LABEL = { not_due: "Not yet due", grace: "In grace period", overdue: "Overdue" } as const;
+const DUE_LABEL = { not_due: "Within the payment window", grace: "In grace period", overdue: "Overdue" } as const;
 
 async function AccountDetail({ params }: { params: Params }) {
   const { accountId } = await params;
@@ -42,16 +43,21 @@ async function AccountDetail({ params }: { params: Params }) {
   const [detail, settings] = await Promise.all([getBillingAccountDetail(teacher, accountId), getBillingSettings()]);
   if (!detail) notFound();
   const { account, legacy, invoices, billable, payments, sessions, advanceLedger } = detail;
-  const block = batchClassBlock(account);
+  const block = classAccessBlock(account);
   const billingOptions = [
-    ...(account.advance.status === "awaiting" ? [{ value: `advance:${account.id}`, label: `First-class payment — ${formatMoney(account.advance.amountMinor)}` }] : []),
+    ...(account.advance.status === "awaiting" ? [{ value: `advance:${account.id}`, label: `Initial enrolment payment — ${formatMoney(account.advance.amountMinor)}` }] : []),
     ...invoices
       .filter((i) => i.status === "issued" && i.summary.balanceMinor > 0)
       .map((i) => ({ value: `invoice:${i.id}`, label: `${i.label} invoice — ${formatMoney(i.summary.balanceMinor)} outstanding` })),
-    ...sessions.filter((s) => s.status === "due").map((s) => ({ value: `session:${s.id}`, label: `Session ${s.date} ${s.startTime} — ${formatMoney(s.amountMinor)}` })),
+    ...sessions
+      .filter((s) => s.status === "due")
+      .map((s) => ({ value: `session:${s.id}`, label: `Session ${s.date} ${s.startTime} (paid separately) — ${formatMoney(s.amountMinor)}` })),
   ];
-  const uninvoiced = billable.filter((b) => b.invoiceId === null && b.coveredBy === null);
-  const currentCycle = account.cycleAnchor ? cycleOf(account.cycleAnchor, new Date().toISOString()) : null;
+  const uninvoiced = billable.filter((b) => b.invoiceId === null);
+  const uninvoicedMinor = uninvoiced.filter((b) => b.coveredBy === null).reduce((t, b) => t + b.rateMinor, 0);
+  // The current month (IST): its invoice is generated on its last calendar day.
+  const currentMonth = periodOf(new Date().toISOString());
+  const unit = account.mode === "batch" ? "class" : "session";
   const paymentRef = (paymentId: string | null) => payments.find((p) => p.id === paymentId)?.reference ?? null;
 
   return (
@@ -63,6 +69,12 @@ async function AccountDetail({ params }: { params: Params }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="type-h2">{account.studentName}</h1>
+          {account.learnerCount > 1 && (
+            <p className="text-sm text-brown">
+              Learn Together ({account.mode === "batch" ? "shared batch" : "shared one-to-one"}): {account.learnerNames.join(" & ")}
+              {account.perLearnerRateMinor ? ` · ${formatMoney(account.perLearnerRateMinor)} per person` : ""} — one login, one invoice
+            </p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">
             {account.courseTitle} · {BILLING_MODE_LABELS[account.mode]}
             {account.batchId && (
@@ -77,14 +89,14 @@ async function AccountDetail({ params }: { params: Params }) {
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge variant={account.status === "active" ? "gold" : "secondary"}>{account.status === "active" ? "Active" : "Closed"}</Badge>
             {account.suspension.active && <Badge variant="destructive">Access suspended since {formatDate(account.suspension.since)}</Badge>}
-            {account.mode === "batch" && <Badge variant="outline">First-class payment: {ADVANCE_STATUS_LABELS[account.advance.status]}</Badge>}
-            {account.mode === "batch" && account.status === "active" && (
+            {account.advance.status !== "not_required" && <Badge variant="outline">Initial enrolment payment: {ADVANCE_STATUS_LABELS[account.advance.status]}</Badge>}
+            {account.status === "active" && (
               <Badge variant={block ? "destructive" : "gold"}>{block ? "Not eligible for the next class" : "Eligible for the next class"}</Badge>
             )}
             <Badge variant="outline">Old dues: {legacy ? LEGACY_DUES_LABELS[legacy.status] : LEGACY_DUES_LABELS.not_verified}</Badge>
           </div>
           {account.closedReason && <p className="mt-2 text-sm text-muted-foreground">Closed: {account.closedReason}</p>}
-          {block && <p className="mt-2 text-sm text-destructive">{BATCH_BLOCK_MESSAGES[block]}</p>}
+          {block && <p className="mt-2 text-sm text-destructive">{CLASS_BLOCK_MESSAGES[block]}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
           {billingOptions.length > 0 && <RecordPaymentDialog enrollmentOptions={[]} billingOptions={billingOptions} methods={settings.methods} defaultTarget={billingOptions[0].value} />}
@@ -92,18 +104,15 @@ async function AccountDetail({ params }: { params: Params }) {
         </div>
       </div>
 
-      {account.mode === "batch" && (
-        <>
-          <section aria-labelledby="pending-charges" className="flex flex-col gap-2">
-            <h2 id="pending-charges" className="type-h3">Billing cycle</h2>
-            <p className="text-sm text-muted-foreground">
-              {account.cycleAnchor && currentCycle
-                ? `Week 1 started ${formatDate(account.cycleAnchor)}. Current cycle ${currentCycle} (${cycleWeeksLabel(currentCycle)}), checkpoint ${formatDateTime(cycleCheckpoint(account.cycleAnchor, currentCycle))} IST.`
-                : "No eligible class yet: week 1 starts on the date of the first eligible class, which is paid by the first-class payment."}{" "}
-              {uninvoiced.length} class(es) not yet invoiced · {formatMoney(uninvoiced.reduce((s, b) => s + b.rateMinor, 0))}. A cycle invoice is issued once a class
-              in its fourth week is recorded, or at the checkpoint at the latest.
-            </p>
-          </section>
+      <section aria-labelledby="pending-charges" className="flex flex-col gap-2">
+        <h2 id="pending-charges" className="type-h3">Monthly billing</h2>
+        <p className="text-sm text-muted-foreground">
+          {uninvoiced.length} {unit}(es) held and recorded but not yet invoiced · {formatMoney(uninvoicedMinor)}
+          {uninvoiced.some((b) => b.coveredBy === "advance") ? ` (the first ${unit} is paid by the initial enrolment payment and deducted on its invoice)` : ""}. The{" "}
+          {periodLabel(currentMonth)} invoice is generated on {formatDate(lastDayOf(currentMonth))} (from 23:00 IST); payment deadline{" "}
+          {formatDateTime(monthlyPaymentDeadline(lastDayOf(currentMonth)))} IST. Access pauses only after the deadline.
+        </p>
+      </section>
 
           <section aria-labelledby="invoices" className="flex flex-col gap-3">
             <h2 id="invoices" className="type-h3">Invoices</h2>
@@ -116,10 +125,17 @@ async function AccountDetail({ params }: { params: Params }) {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="font-semibold text-brown">{i.label}</p>
+                        {i.learnerCount > 1 && (
+                          <p className="text-xs text-brown">
+                            {i.learnerNames.join(" & ")}
+                            {i.perLearnerRateMinor ? ` · ${formatMoney(i.perLearnerRateMinor)} per person × ${i.learnerCount} = ${formatMoney(i.perLearnerRateMinor * i.learnerCount)} per session` : ""}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground">
                           {i.id} · {account.studentName} · {account.courseTitle}
-                          {i.batchId ? " · batch" : ""} · issued {formatDate(i.issuedAt)} ·{" "}
-                          {i.kind === "cycle" ? `due ${formatDateTime(i.deadlineAt)}` : `due ${formatDate(i.dueAt)} · payment deadline ${formatDateTime(i.deadlineAt)}`}
+                          {i.batchId ? " · batch" : ""} · {i.invoiceDate ? `invoice date ${formatDate(i.invoiceDate)}` : `issued ${formatDate(i.issuedAt)}`} ·{" "}
+                          {i.kind === "legacy_monthly" ? `due ${formatDate(i.dueAt)} · payment deadline ${formatDateTime(i.deadlineAt)}` : `payment deadline ${formatDateTime(i.deadlineAt)}`}
+                          {i.kind !== "month" ? " · earlier billing (history)" : ""}
                         </p>
                       </div>
                       <span className="flex flex-wrap items-center gap-2">
@@ -137,7 +153,8 @@ async function AccountDetail({ params }: { params: Params }) {
                           <tr key={l.classId} className="border-t border-border">
                             <td className="py-1.5 text-brown">
                               {l.date} · {l.title}
-                              {i.kind === "monthly" && l.period !== i.period ? ` (recorded late, ${periodLabel(l.period)})` : ""}
+                              {i.kind !== "cycle" && l.period !== i.period ? ` (recorded late, ${periodLabel(l.period)})` : ""}
+                              {l.coveredByInitialPayment ? " · paid by the initial enrolment payment" : ""}
                             </td>
                             <td className="py-1.5 text-muted-foreground">{CLASS_OUTCOME_LABELS[l.outcome]}</td>
                             <td className="py-1.5 text-right text-brown">{formatMoney(l.rateMinor)}</td>
@@ -145,14 +162,14 @@ async function AccountDetail({ params }: { params: Params }) {
                         ))}
                         <tr className="border-t border-border">
                           <td colSpan={2} className="py-1.5 text-muted-foreground">
-                            Eligible classes: {i.lines.length}
-                            {new Set(i.lines.map((l) => l.rateMinor)).size === 1 && i.lines.length > 0 ? ` × ${formatMoney(i.lines[0].rateMinor)} per class` : ""}
+                            Billable {i.mode === "batch" ? "classes" : "sessions"}: {i.lines.length}
+                            {new Set(i.lines.map((l) => l.rateMinor)).size === 1 && i.lines.length > 0 ? ` × ${formatMoney(i.lines[0].rateMinor)}` : ""}
                           </td>
                           <td className="py-1.5 text-right text-brown">{formatMoney(i.subtotalMinor)}</td>
                         </tr>
                         {i.advanceAppliedMinor > 0 && (
                           <tr>
-                            <td colSpan={2} className="py-1.5 text-muted-foreground">Enrolment advance applied (monthly billing)</td>
+                            <td colSpan={2} className="py-1.5 text-muted-foreground">Initial enrolment payment deducted</td>
                             <td className="py-1.5 text-right text-brown">−{formatMoney(i.advanceAppliedMinor)}</td>
                           </tr>
                         )}
@@ -189,17 +206,12 @@ async function AccountDetail({ params }: { params: Params }) {
               </ul>
             )}
           </section>
-        </>
-      )}
 
-      {account.mode === "individual" && (
+      {sessions.length > 0 && (
         <section aria-labelledby="sessions" className="flex flex-col gap-3">
-          <h2 id="sessions" className="type-h3">Individual sessions</h2>
-          {sessions.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">
-              No sessions yet. Schedule a class on the Classes page and choose this student&apos;s individual account.
-            </p>
-          ) : (
+          <h2 id="sessions" className="type-h3">Sessions paid separately (earlier per-session method)</h2>
+          <p className="text-sm text-muted-foreground">Scheduled before monthly invoicing: still payable one at a time, never added to a monthly invoice.</p>
+          {(
             <ul className="divide-y divide-border rounded-2xl border border-border bg-card text-sm shadow-soft">
               {sessions.map((s) => (
                 <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
@@ -232,7 +244,7 @@ async function AccountDetail({ params }: { params: Params }) {
                 <span className="min-w-0">
                   <span className="font-semibold text-brown">{formatMoney(p.amountMinor)}</span>
                   <span className="text-muted-foreground">
-                    {" "}· {p.purpose === "advance" ? "First-class payment" : p.purpose === "session" ? "Individual session" : "Invoice"} · {PAYMENT_METHOD_LABELS[p.method]} · {formatDate(p.paidAt)}
+                    {" "}· {paymentPurposeLabel(p) ?? "Payment"} · {PAYMENT_METHOD_LABELS[p.method]} · {formatDate(p.paidAt)}
                     {p.reference ? ` · Ref ${p.reference}` : ""}
                   </span>
                   {p.notes && p.source === "gateway" && <span className="block text-xs text-destructive">{p.notes}</span>}
@@ -254,9 +266,9 @@ async function AccountDetail({ params }: { params: Params }) {
         )}
       </section>
 
-      {account.mode === "batch" && (
+      {(
         <section aria-labelledby="ledger" className="flex flex-col gap-3">
-          <h2 id="ledger" className="type-h3">Charged classes</h2>
+          <h2 id="ledger" className="type-h3">Charged {account.mode === "batch" ? "classes" : "sessions"}</h2>
           {billable.length === 0 ? (
             <p className="text-sm text-muted-foreground">None yet.</p>
           ) : (
@@ -269,7 +281,7 @@ async function AccountDetail({ params }: { params: Params }) {
                   <span className="text-muted-foreground">
                     {CLASS_OUTCOME_LABELS[b.outcome]} · {formatMoney(b.rateMinor)} (rate {b.rateVersionId}) ·{" "}
                     {b.coveredBy === "advance"
-                      ? `first class — paid by the first-class payment${account.advance.status === "awaiting" ? " (not yet received)" : paymentRef(account.advance.paymentId) ? ` (ref ${paymentRef(account.advance.paymentId)})` : ""}`
+                      ? `first ${unit} — paid by the initial enrolment payment${account.advance.status === "awaiting" ? " (not yet received)" : paymentRef(account.advance.paymentId) ? ` (ref ${paymentRef(account.advance.paymentId)})` : ""}${b.invoiceId ? `, deducted on ${b.invoiceId.split("_").pop()}` : ""}`
                       : b.invoiceId
                         ? `invoiced (${b.invoiceId.split("_").pop()})`
                         : "not yet invoiced"}
@@ -283,12 +295,12 @@ async function AccountDetail({ params }: { params: Params }) {
 
       {advanceLedger.length > 0 && (
         <section aria-labelledby="advance-ledger" className="flex flex-col gap-2">
-          <h2 id="advance-ledger" className="type-h3">First-class payment ledger</h2>
+          <h2 id="advance-ledger" className="type-h3">Initial enrolment payment ledger</h2>
           <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
             {advanceLedger.map((e) => (
               <li key={e.id}>
-                {formatDateTime(e.at)} · {e.kind === "received" ? "Received" : e.kind === "reversed" ? "Reversed (payment error)" : "Applied"} {formatMoney(e.amountMinor)}
-                {e.invoiceId ? ` to ${e.invoiceId.split("_").pop()}` : ""}
+                {formatDateTime(e.at)} · {e.kind === "received" ? "Received" : e.kind === "reversed" ? "Reversed (payment error)" : "Deducted"} {formatMoney(e.amountMinor)}
+                {e.invoiceId ? ` on ${e.invoiceId.split("_").pop()}` : ""}
               </li>
             ))}
           </ul>

@@ -6,23 +6,41 @@ Status legend: **Implemented** (code exists) · **Tested** (automated tests ran 
 
 Nothing in this work was committed, pushed or deployed. No production data was read or written.
 
-## Billing model (confirmed rules)
+## Billing model (confirmed rules — calendar-month billing)
 
 | Rule | Detail |
 |---|---|
 | Start | Website billing starts with **November 2026**. Fees up to October 2026 stay with the previous payment method; classes before 1 Nov 2026 (IST) are never charged by the website. |
-| Old dues gate | A student enters website billing (added to a batch, or given an individual account) only after an administrator records **"old dues cleared"** or **"no dues before November 2026"**. The record keeps who verified it and when. No amounts are entered or invented. |
-| Batch classes | ₹400 per class per student. **Attended** and **absent** are charged. **Academy-cancelled**, **rescheduled** and **unknown attendance** are not. A charged class cannot be changed to a non-billable outcome (use a credit note). |
-| Monthly invoice | One invoice per student per calendar month (`{accountId}_{YYYY-MM}`, created once — retries and concurrent runs cannot duplicate it). It covers every charged class of that month not yet invoiced (and any earlier month's leftovers). Example: 8 classes = ₹3,200 − ₹400 advance = **₹2,800**. |
-| Advance | ₹400, once per batch account, **non-refundable** (also when a student stops early). Deducted only after it is **verified** (paid), on the first invoice generated after that; an unused part is carried to later invoices. Every receipt/application/reversal is written to `advanceLedger`. An unpaid advance is never deducted. The only way to undo a recorded advance payment is **"Reverse (payment error)"** with a required mistake reason (duplicate payment, wrong student, wrong amount, money not received) — the advance then becomes owed again; it is not a refund path. |
-| Due date / grace | Due on the last day of the month; **payment deadline = 7th of the next month, 23:59:59.999 IST**. 00:00 IST on the 8th is overdue. (Tested at the exact millisecond boundary.) |
-| Suspension | Unpaid after the deadline → batch access paused (Meet links hidden from the page payload, course pages blocked, banner shown). Records are kept. Restored automatically when no invoice is past its deadline with a balance (after a verified payment, credit note, or re-evaluation). |
-| Individual sessions | ₹750 each, paid per session (`sessionCharges/sc_{classId}`), never invoiced monthly. Student cancels **≥ 24 h** before start → no charge; **< 24 h** → still payable; academy cancels or reschedules → no charge. Decided on the server with the server clock. |
-| Rates | Versioned and effective from a month (`settings/classBilling.rateVersions`). A new version must start in a **future** month; every charge stores its rate and version id; issued invoices are never recalculated. v1 (Nov 2026) = ₹400 / ₹750 / ₹400. |
-| Legacy packages | **Read-only** (`src/lib/lms/legacy-packages.ts`). Blocked on the server: creating, activating or adjusting a package, recording a new payment against one, and scheduling a new class that uses package credits. Still possible: viewing, cancelling a package, and correcting the status of an already-recorded payment. Records are never deleted. A class linked to a package can never also be billed per class. |
-| Enrolment fee | Enrolling a student **never** copies the catalogue's legacy `course.price` into `agreedFee` (it is template data, not an approved fee). `agreedFee` starts empty; a teacher can set one explicitly, with a reason, if ever needed. No debt is created or inferred. |
+| Old dues gate | A student enters website billing (added to a batch, or given an individual account) only after an administrator records **"old dues cleared"** or **"no dues before November 2026"**. No amounts are entered or invented; old dues are never cleared automatically. |
+| Billing period | The calendar month in **Asia/Kolkata** (1st 00:00 → last day 23:59:59.999 IST). Months with 4, 5 or any number of classes are billed for exactly the classes held and recorded. |
+| Invoice | One invoice per billing account (student × course × class type) per month: `invoices/{accountId}_m{YYYY-MM}`, created once — retries and concurrent runs cannot duplicate it. Generated on the **last calendar day** of the month, from **23:00 IST** (`MONTHLY_INVOICE_FROM_HOUR`), by the daily job (23:30 IST) or when an outcome is recorded after 23:00. A class recorded after its month's invoice goes on the next month's invoice, once. If the job could not run on the last day, the invoice is dated the day it is generated (the student still gets the full window). |
+| Payment deadline | End of the **3rd calendar day after the invoice date**, IST: 30 Nov invoice → **3 Dec 23:59:59.999 IST** (`2026-12-03T18:29:59.999Z`). Overdue = unpaid after that instant. No restriction during the window. |
+| Batch classes | ₹400 per class per student. **Attended** and **absent** are charged. **Academy-cancelled**, **rescheduled** (the replacement is charged when held) and **unknown attendance** are not. Student cancellation of a batch class: not billed by default (pending decision). A charged class cannot be changed to a non-billable outcome (use a credit note). |
+| Individual sessions | ₹750 per session, on the same monthly invoice (no longer paid upfront per session). Attended/absent → billable; student cancels **≥ 24 h** before the start → no charge, **< 24 h** → billable; academy cancellation or rescheduling → no charge; unknown → not billed. Server clock. |
+| Initial enrolment payment | Batch ₹400 / individual ₹750, paid at enrolment (stored as the account's advance), **non-refundable**. It covers the **first eligible class/session**: that class is listed on its monthly invoice and the payment is deducted there ("Initial enrolment payment deducted"); the advance becomes `applied` in the same transaction, so it is never deducted twice, and the class is never invoiced twice. If the payment is still awaited when the month closes, that first class waits for a later invoice (never charged as well as paid). Every receipt/deduction/reversal is in `advanceLedger`. |
+| Suspension | An invoice unpaid after its deadline → access paused for that account (batch **or individual**): Meet links withheld server-side, lessons/materials blocked (server and Firestore rules). Enforced by the daily job and, deadline-precisely, whenever the student opens classes, batches or course content (`enforceOverdueForStudent`). Restored after a verified payment once **no other** invoice is past its deadline with a balance (partial payments do not restore access). Records are kept. |
+| Rates | Versioned and effective from a month (`settings/classBilling.rateVersions`). Every charge stores its rate and version id; issued invoices are never recalculated. v1 (Nov 2026) = ₹400 / ₹750 / ₹400. |
+| History (kept, read-only) | **Four-week cycle invoices** (`…_c{k}`, kind "cycle") and **first-model monthly invoices** (`…_{YYYY-MM}`) keep their stored/derived deadlines and still count for suspension while unpaid. **Per-session charges** (`sessionCharges`) created before this change stay payable one at a time and are never put on a monthly invoice. Nothing is deleted or migrated in place. |
+| Legacy packages | **Read-only** (`src/lib/lms/legacy-packages.ts`). A class linked to a package can never also be billed per class. |
 
-The four-class cycle has been removed everywhere (types, server logic, UI, tests). Nothing in the code still groups classes in fours.
+## Enrolment types and Learn Together
+
+| Type | Learners | Rate per session | Notes |
+|---|---|---|---|
+| Batch – Individual | 1 | the course's batch rate (₹400) | one place in a batch |
+| One-to-One | 1 | the course's individual rate (₹750) | individual schedule |
+| Learn Together – Batch | 2 | ₹360 per learner = **₹720** | two places in a batch |
+| Learn Together – One-to-One | 2 | ₹700 per learner = **₹1,400** | individual schedule |
+
+* Learn Together = two learners under **one** student login and dashboard: one registration, one enrolment, one billing
+  account and one monthly invoice (both names, per-person and per-session rates shown). Exactly two learners are
+  required (one or three are refused on the server). The rates are fixed academy rules (no approval step).
+* Every amount is calculated on the server (`priceEnrolment`); the initial payment is one session for the enrolment
+  (₹720 / ₹1,400 for Learn Together) and is deducted once on the first monthly invoice.
+* The agreed rate stored on the billing account is per session for the whole enrolment; invoices use it and never
+  the latest course price. Attendance and billing are per session for the shared login (the LMS records one attendance
+  per class per login; per-learner attendance within a shared enrolment is not tracked).
+* Registrations and accounts saved before enrolment types read as single-learner enrolments.
 
 ## Where things are
 
@@ -37,7 +55,7 @@ The four-class cycle has been removed everywhere (types, server logic, UI, tests
 | Payments (manual + Razorpay test mode) | `src/app/(account)/teacher/payment-actions.ts`, `src/lib/lms/server/gateway.ts`, `src/lib/payments/*`, `/api/payments/razorpay/webhook` |
 | Scheduled job | `src/app/api/cron/billing/route.ts`, `vercel.json` |
 | Teacher screens | `/teacher/billing`, `/teacher/billing/[accountId]`, `/teacher/billing/settings`, `/teacher/batches/[batchId]`, `/teacher/students/[id]` (Old dues) |
-| Student screens | `/dashboard` (batch, fee banner, suspension), `/dashboard/billing` (advance, invoices, sessions) |
+| Student screens | `/dashboard` (batch, fee banner, suspension), `/dashboard/billing` (initial payment, monthly invoices, earlier per-session charges, payment history) |
 
 New Firestore collections (Admin SDK only; the existing deny-all rule covers them):
 `advanceLedger`, `sessionCharges`, `legacyDues` (plus `batches`, `billingAccounts`, `billableClasses`, `invoices`,
@@ -47,7 +65,8 @@ existing is rewritten.
 ## Configuration still needed
 
 1. **Scheduled billing job** — set `CRON_SECRET` (a long random string) in Vercel. `vercel.json` runs
-   `GET /api/cron/billing` daily at 19:00 UTC (00:30 IST); Vercel sends `Authorization: Bearer $CRON_SECRET`.
+   `GET /api/cron/billing` daily at 18:00 UTC (23:30 IST) so month-end invoices are generated on the last day;
+   Vercel sends `Authorization: Bearer $CRON_SECRET`.
    Without the variable the endpoint answers 503 and does nothing. The job is idempotent: it generates each completed
    month's invoices (create-once ids) and re-evaluates suspensions. "Run billing now" on `/teacher/billing` runs the same job.
    Note: Vercel Hobby plans allow daily crons only, which is what this needs.
@@ -169,3 +188,10 @@ proxy), plus a test Cloudinary environment. Existing public assets would need re
 - One real Razorpay **Test Mode** order (₹400 advance) was created locally against the emulator and Checkout was closed
   without paying. A completed test payment, invoice/session payments and real webhook delivery are still to be tested
   (on the emulator or a listed staging project — never production).
+
+## Special Programmes and recordings (additive, no migration)
+
+- `courses/{id}.programme` (optional): `{ programmeType, feeMinor, durationText, startDate, endDate, sessions[{ id, date, start, end, title, recordingVideoId }], maxParticipants, materials, recordingsAvailable, status }`. No field = Regular Academy Course (all existing courses). Saving a programme also sets `availability` (Draft = not listed). A course that already has regular billing accounts cannot be turned into a programme.
+- `registrations/{id}.kind` (optional): `"special"` for programme registrations; missing = `"regular"`. Special registrations use `initialAmountMinor` = full fee, `rateVersionId: "programme"`, `programmeFeeMinor`. `status: "paid"` means *registration confirmed*; the verified payment writes an active `enrollments` doc (`source: "programme"`), or it is written when a guest's account is linked. No billing account, advance, invoice or billable class is ever created for them.
+- `liveClasses/{id}.recordingVideoId` (+ `recordingUpdatedAt`, `recordingUpdatedBy`): a validated 11-character YouTube id, set on every learner record of the session. Students read recordings only through the server (`lib/lms/server/recordings.ts`) after the active-enrolment check; `liveClasses` stays browser-denied and courses stay readable only by their teachers and enrolled students. No rules change.
+- Older documents need no backfill. Unlisted YouTube videos are not fully private: anyone who obtains the link can watch them.

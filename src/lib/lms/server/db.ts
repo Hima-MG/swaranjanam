@@ -3,6 +3,8 @@ import "server-only";
 import { Timestamp, type DocumentData, type DocumentSnapshot } from "firebase-admin/firestore";
 
 import { getAdminDb } from "@/lib/firebase/admin";
+import { mapScheduleInfo } from "@/lib/lms/course-pricing";
+import { mapProgramme } from "@/lib/lms/programme";
 import {
   COURSE_AVAILABILITY,
   COURSE_CATEGORIES,
@@ -66,8 +68,8 @@ export const COLLECTIONS = {
   legacyDues: "legacyDues",
   gatewayOrders: "gatewayOrders",
   gatewayEvents: "gatewayEvents",
-  // Website enrolment requests (see lib/lms/server/enrolment.ts).
-  enrolmentRequests: "enrolmentRequests",
+  // Website registrations: details, preferences and the initial payment (lib/lms/server/registrations.ts).
+  registrations: "registrations",
 } as const;
 
 export function db() {
@@ -126,6 +128,7 @@ export function mapCatalogFields(data: DocumentData): CourseCatalogFields {
     featured: data.featured === true,
     outcomes: strings(data.outcomes),
     outcomesMl: strings(data.outcomesMl),
+    prerequisites: strings(data.prerequisites),
     availability: oneOfOrNull(COURSE_AVAILABILITY, data.availability),
   };
 }
@@ -145,6 +148,9 @@ export function mapCourse(snapshot: DocumentSnapshot<DocumentData>): CourseRecor
     thumbnailPublicId: str(data.thumbnailPublicId) || null,
     status: oneOf(COURSE_STATUSES, data.status, "draft"),
     teacherIds: Array.isArray(data.teacherIds) ? data.teacherIds.filter((id): id is string => typeof id === "string") : [],
+    storedPricing: data.pricing && typeof data.pricing === "object" ? (data.pricing as Record<string, unknown>) : null,
+    scheduleInfo: mapScheduleInfo(data.scheduleInfo),
+    programme: mapProgramme(data.programme),
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };

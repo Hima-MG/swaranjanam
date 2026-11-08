@@ -48,6 +48,7 @@ import {
   type PricePlan,
   type ReceiptStatus,
 } from "@/lib/lms/billing";
+import { paymentPurposeLabel } from "@/lib/lms/class-billing";
 import { mapLiveClass } from "@/lib/lms/server/classes";
 import { col, toIso } from "@/lib/lms/server/db";
 import { mapPayment } from "@/lib/lms/server/payments";
@@ -538,6 +539,8 @@ export async function readReceiptContext(
   pkg: PackageRecord | null,
   /** Class-based billing: what the payment was for, e.g. "Swara Foundation — invoice for November 2026". */
   titleSuffix?: string,
+  /** A guest registration's learner (no student account yet). */
+  learnerName?: string,
 ): Promise<ReceiptContext> {
   const receiptRef = col("receipts").doc(payment.id);
   const counterRef = receiptCounterRef();
@@ -550,10 +553,10 @@ export async function readReceiptContext(
   } else {
     // Legacy enrollment payment: the student's and course's names at issue time.
     const [student, course] = await Promise.all([
-      tx.get(col("users").doc(payment.studentId)),
+      isValidId(payment.studentId) ? tx.get(col("users").doc(payment.studentId)) : Promise.resolve(null),
       isValidId(payment.courseId) ? tx.get(col("courses").doc(payment.courseId)) : Promise.resolve(null),
     ]);
-    learnerNames = [str(student.get("displayName")) ?? str(student.get("email")) ?? "Student"];
+    learnerNames = [str(student?.get("displayName")) ?? str(student?.get("email")) ?? learnerName ?? "Student"];
     title = str(course?.get("title")) ?? "Course fee";
     if (titleSuffix) title = `${title} — ${titleSuffix}`;
   }
@@ -723,7 +726,12 @@ export async function getOwnBilling(user: SessionUser) {
       })
       .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? "")),
     payments: payments
-      .map((p) => ({ ...toStudentPayment(p), packageTitle: p.packageId ? (titles.get(p.packageId) ?? "Package") : null, receiptId: p.receiptId }))
+      .map((p) => ({
+        ...toStudentPayment(p),
+        packageTitle: p.packageId ? (titles.get(p.packageId) ?? "Package") : null,
+        forLabel: paymentPurposeLabel(p),
+        receiptId: p.receiptId,
+      }))
       .sort((a, b) => (b.paidAt ?? "").localeCompare(a.paidAt ?? "")),
     receipts: receiptsSnap.docs
       .map(mapReceipt)

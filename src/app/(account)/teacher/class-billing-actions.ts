@@ -7,14 +7,11 @@ import { CATALOG_TAG } from "@/lib/catalog/server";
 import { paiseToRupeesText, parseRupees } from "@/lib/lms/billing";
 import {
   accountIdFor,
-  initialAdvance,
   LEGACY_DUES_STATUSES,
   membershipLockId,
   parsePolicy,
   periodLabel,
-  periodOf,
   rateChangeError,
-  rateVersionForPeriod,
   type LegacyDuesStatus,
 } from "@/lib/lms/class-billing";
 import { writeAudit } from "@/lib/lms/server/audit";
@@ -22,6 +19,8 @@ import { AccessError, getActiveEnrollment, requireActionUser, runAction } from "
 import {
   assertLegacyDuesClearedInTx,
   classBillingConfigRef,
+  courseRateInTx,
+  initialAgreedRates,
   evaluateSuspension,
   legacyDuesRef,
   mapAccount,
@@ -31,6 +30,7 @@ import {
   runScheduledBilling,
 } from "@/lib/lms/server/class-billing";
 import { col, db, mapCourse } from "@/lib/lms/server/db";
+import { provisionPendingRegistrations } from "@/lib/lms/server/guest-enrolment";
 import { assertStudent } from "@/lib/lms/server/students";
 import type { ActionResult } from "@/lib/lms/types";
 import { cleanText, isValidId } from "@/lib/lms/validation";
@@ -44,13 +44,17 @@ const entry = (user: { uid: string; email: string | null }, change: string) => (
 
 /**
  * Runs the billing job now (same code as the scheduled job): issues every
- * cycle invoice that is due and re-evaluates suspensions.
+ * monthly invoice that is due (from 23:00 IST on the month's last day) and
+ * re-evaluates suspensions.
  * Idempotent — running it again changes nothing.
  */
-export async function runBillingNow(): Promise<ActionResult<{ created: number; emptyCycles: number; suspended: number; restored: number; errors: number }>> {
+export async function runBillingNow(): Promise<ActionResult<{ created: number; suspended: number; restored: number; errors: number }>> {
   return runAction("runBillingNow", async () => {
     const user = await requireActionUser("teacher");
     const r = await runScheduledBilling(user);
+    // Also retries student-account provisioning for verified guest registrations.
+    const accounts = await provisionPendingRegistrations();
+    r.errors += accounts.errors;
     await writeAudit(user, {
       action: "billing.run",
       targetType: "settings",
@@ -58,7 +62,7 @@ export async function runBillingNow(): Promise<ActionResult<{ created: number; e
       summary: `Billing run: ${r.invoicesCreated} invoice(s) created, ${r.suspended} suspended, ${r.restored} restored, ${r.errors} error(s)`,
     });
     refresh();
-    return { created: r.invoicesCreated, emptyCycles: r.emptyCycles, suspended: r.suspended, restored: r.restored, errors: r.errors };
+    return { created: r.invoicesCreated, suspended: r.suspended, restored: r.restored, errors: r.errors };
   });
 }
 
@@ -82,8 +86,8 @@ export async function recordInvoiceAdjustment(invoiceId: unknown, kindInput: unk
       }
       tx.create(col("invoiceAdjustments").doc(), {
         invoiceId,
-        accountId: state.account.id,
-        studentId: state.account.studentId,
+        accountId: state.owner.accountId,
+        studentId: state.owner.studentId,
         kind: kindInput,
         amountMinor,
         reason,
@@ -91,9 +95,9 @@ export async function recordInvoiceAdjustment(invoiceId: unknown, kindInput: unk
         byEmail: user.email,
         at: FieldValue.serverTimestamp(),
       });
-      return { accountId: state.account.id, summary: `${kindInput === "credit_note" ? "Credit" : "Debit"} note ${rupees(amountMinor)} on the ${periodLabel(state.invoice!.period)} invoice: ${reason}` };
+      return { accountId: state.owner.accountId, summary: `${kindInput === "credit_note" ? "Credit" : "Debit"} note ${rupees(amountMinor)} on the ${periodLabel(state.invoice!.period)} invoice: ${reason}` };
     });
-    await evaluateSuspension(result.accountId, user);
+    if (result.accountId) await evaluateSuspension(result.accountId, user);
     await writeAudit(user, { action: `invoice.${kindInput}`, targetType: "invoice", targetId: invoiceId, summary: result.summary });
     refresh();
     return null;
@@ -102,7 +106,7 @@ export async function recordInvoiceAdjustment(invoiceId: unknown, kindInput: unk
 
 /**
  * Marks a billing account as closed (left the course). Keeps all history.
- * Charges already recorded are still invoiced by the cycle job. No refund
+ * Charges already recorded are still invoiced on the next monthly invoice. No refund
  * of an unused advance is made automatically (decision pending).
  */
 export async function closeBillingAccount(accountId: unknown, reasonInput: unknown): Promise<ActionResult> {
@@ -141,7 +145,7 @@ export async function closeBillingAccount(accountId: unknown, reasonInput: unkno
   });
 }
 
-/** Individual one-to-one sessions: ₹750 per session, each paid separately. Requires verified old dues. */
+/** Individual one-to-one sessions at the course's current individual rate (then fixed), invoiced monthly. Requires verified old dues. */
 export async function openIndividualAccount(studentIdInput: unknown, courseIdInput: unknown): Promise<ActionResult<{ accountId: string }>> {
   return runAction("openIndividualAccount", async () => {
     const user = await requireActionUser("teacher");
@@ -153,9 +157,9 @@ export async function openIndividualAccount(studentIdInput: unknown, courseIdInp
     const ref = col("billingAccounts").doc(accountId);
     await db().runTransaction(async (tx) => {
       await assertLegacyDuesClearedInTx(tx, student.uid);
-      const [snap, configSnap] = await Promise.all([tx.get(ref), tx.get(classBillingConfigRef())]);
+      const snap = await tx.get(ref);
       if (snap.exists) throw new AccessError("This student already has an individual billing account for this course.");
-      const version = rateVersionForPeriod(mapConfig(configSnap).rateVersions, periodOf(new Date().toISOString()));
+      const rateMinor = await courseRateInTx(tx, course.id, "individual");
       tx.create(ref, {
         studentId: student.uid,
         courseId: course.id,
@@ -164,12 +168,14 @@ export async function openIndividualAccount(studentIdInput: unknown, courseIdInp
         batchId: null,
         studentName: student.name,
         courseTitle: course.title,
-        advance: initialAdvance("individual", version),
+        // Opened by the academy without an online initial payment: no first-session credit.
+        advance: { status: "not_required", amountMinor: 0, appliedMinor: 0, paymentId: null },
+        agreedRates: initialAgreedRates(rateMinor),
         suspension: { active: false, since: null, invoiceIds: [], liftedAt: null },
         billableCount: 0,
         createdAt: FieldValue.serverTimestamp(),
         createdBy: user.uid,
-        history: [entry(user, "Individual-session account opened (₹750 per session, paid per session)")],
+        history: [entry(user, `Individual-session account opened (₹${rateMinor / 100} per session, invoiced monthly)`)],
       });
     });
     await writeAudit(user, { action: "billingAccount.open", targetType: "billingAccount", targetId: accountId, summary: `Opened individual sessions for ${student.label} (${course.title})` });

@@ -33,7 +33,7 @@ async function Batches() {
                   {b.name}
                 </Link>
                 <Badge variant={b.status === "active" ? (b.memberCount >= b.capacity ? "outline" : "gold") : "secondary"}>
-                  {b.status === "archived" ? "Archived" : `${b.memberCount}/${b.capacity} learners`}
+                  {b.status === "archived" ? "Inactive" : `${b.memberCount}/${b.capacity} learners`}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
@@ -53,7 +53,7 @@ export default function TeacherBatchesPage() {
   return (
     <>
       <TeacherPageHeader
-        title="Batches"
+        title="Manage batches"
         description={`Small groups of up to ${MAX_BATCH_CAPACITY} learners with a shared schedule and Google Meet link. Attendance and billing stay individual.`}
       />
       <Suspense fallback={<LoadingState label="Loading batches…" />}>

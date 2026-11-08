@@ -47,7 +47,7 @@ async function BatchDetail({ params }: { params: Params }) {
   const active = members.filter((m) => m.status === "active");
   const names = new Map(members.map((m) => [m.studentId, m.studentName]));
   const now = detail.nowMs;
-  const scheduleBlock = batch.status !== "active" ? "This batch is archived." : !batch.meetUrl ? "Add a Google Meet link first." : active.length === 0 ? "Add learners first." : null;
+  const scheduleBlock = batch.status !== "active" ? "This batch is inactive." : !batch.meetUrl ? "Add a Google Meet link first." : active.length === 0 ? "Add learners first." : null;
   const billing = await getAccountsBillingStatus(teacher, Object.values(accounts));
 
   return (
@@ -64,7 +64,7 @@ async function BatchDetail({ params }: { params: Params }) {
             {batch.courseTitle} · {batch.teacherName} · {batch.schedule}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Badge variant={batch.status === "active" ? "gold" : "secondary"}>{batch.status === "active" ? "Active" : "Archived"}</Badge>
+            <Badge variant={batch.status === "active" ? "gold" : "secondary"}>{batch.status === "active" ? "Active" : "Inactive"}</Badge>
             <Badge variant="outline">
               {batch.memberCount}/{batch.capacity} learners
             </Badge>
@@ -86,7 +86,7 @@ async function BatchDetail({ params }: { params: Params }) {
             courses={courses}
             teachers={teachers}
             maxCapacity={MAX_BATCH_CAPACITY}
-            existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, schedule: batch.schedule, meetUrl: batch.meetUrl, capacity: batch.capacity, status: batch.status }}
+            existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, schedule: batch.schedule, weekly: batch.weekly, meetUrl: batch.meetUrl, capacity: batch.capacity, status: batch.status }}
           />
         </div>
       </div>
@@ -178,7 +178,7 @@ async function BatchDetail({ params }: { params: Params }) {
           </ul>
         )}
         <p className="text-xs text-muted-foreground">
-          Attended and absent are charged per student. Each student&apos;s first eligible class is paid by the first-class payment; later classes are invoiced per four-week cycle (classes 2–4, then four at a time), due at the end of the cycle&apos;s fourth week. Academy-cancelled, rescheduled and unknown-attendance classes are not charged. A charged class cannot be changed to a non-billable outcome; use a credit note on the invoice instead.
+          Attended and absent are charged per student and invoiced at the end of each calendar month (due within 3 days). Each student&apos;s first eligible class is paid by the initial enrolment payment, deducted on its monthly invoice. Academy-cancelled, rescheduled and unknown-attendance classes are not charged. A charged class cannot be changed to a non-billable outcome; use a credit note on the invoice instead.
         </p>
       </section>
     </div>

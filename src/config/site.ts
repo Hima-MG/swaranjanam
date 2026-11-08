@@ -40,7 +40,7 @@ export const siteConfig = {
     /** Official click-to-chat link: digits only, country code first (918547545175). */
     whatsappUrl: `https://wa.me/${WHATSAPP_NUMBER.replace(/\D/g, "")}`,
     address: "Palakkad, Kerala, India",
-    hours: "Monday – Saturday, 9:00 AM – 6:00 PM IST",
+    hours: "Monday–Saturday, 9:00 AM–6:00 PM IST",
   },
   social: {
     instagram: { handle: "@swaraanjanam", url: "https://www.instagram.com/swaraanjanam/" },

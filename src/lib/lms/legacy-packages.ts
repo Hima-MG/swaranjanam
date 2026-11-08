@@ -1,7 +1,7 @@
 // Legacy prepaid class packages (the earlier four-class model) are READ-ONLY.
 //
-// Website billing from November 2026 uses four-week cycles for batch classes and per
-// session for individual classes (lib/lms/class-billing.ts). Existing package
+// Website billing from November 2026 uses calendar-month invoices for batch classes
+// and individual sessions (lib/lms/class-billing.ts). Existing package
 // records, payments and receipts are kept unchanged as history and stay
 // visible. No new package activity is allowed: creating or activating a
 // package, adjusting it, recording a new payment against it, or scheduling a
@@ -13,7 +13,7 @@
 export const LEGACY_PACKAGES_READ_ONLY = true;
 
 export const LEGACY_PACKAGES_MESSAGE =
-  "Class packages are a legacy billing method and are now read-only. Batch classes are billed in four-week cycles and individual sessions per session (Billing).";
+  "Class packages are a legacy billing method and are now read-only. Batch classes and individual sessions are invoiced monthly (Billing).";
 
 /** The package operations that are blocked while packages are read-only. */
 export const BLOCKED_PACKAGE_OPERATIONS = ["create", "activate", "adjust", "record_payment", "schedule_class"] as const;

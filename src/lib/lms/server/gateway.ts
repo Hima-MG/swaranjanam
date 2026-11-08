@@ -6,6 +6,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { AccessError } from "@/lib/lms/server/access";
 import { readReceiptContext, writeReceipt } from "@/lib/lms/server/billing";
 import { applyVerifiedPayment, evaluateSuspension, readPaymentTarget, type PaymentTarget } from "@/lib/lms/server/class-billing";
+import { provisionRegistrationAccount, readGuestRegistration } from "@/lib/lms/server/guest-enrolment";
 import { col, db, toIso } from "@/lib/lms/server/db";
 import type { PaymentRecord } from "@/lib/lms/types";
 import { assertTestPaymentEnvironment, createRazorpayOrder, fetchRazorpayPayment, GatewayConfigError, readRazorpayConfig } from "@/lib/payments/razorpay";
@@ -23,7 +24,8 @@ import { verifyCheckoutSignature } from "@/lib/payments/razorpay-signature";
 //    webhook events are recorded once in gatewayEvents/{eventId}.
 //  * Receipts are issued through the existing transaction-guarded workflow.
 
-const targetKey = (t: PaymentTarget) => (t.kind === "advance" ? `advance_${t.accountId}` : t.kind === "session" ? `session_${t.chargeId}` : `invoice_${t.invoiceId}`);
+const targetKey = (t: PaymentTarget) =>
+  t.kind === "advance" ? `advance_${t.accountId}` : t.kind === "session" ? `session_${t.chargeId}` : t.kind === "registration" ? `registration_${t.registrationId}` : `invoice_${t.invoiceId}`;
 const ORDER_REUSE_MS = 12 * 60 * 60 * 1000;
 const GATEWAY_ACTOR = { uid: "razorpay", email: null };
 
@@ -43,7 +45,30 @@ export async function createOrderForStudent(user: SessionUser, target: PaymentTa
 
   // Read-only check of ownership and the amount payable right now.
   const state = await db().runTransaction((tx) => readPaymentTarget(tx, target));
-  if (state.account.studentId !== user.uid) throw new AccessError("That payment could not be found.");
+  if (!state.owner.studentId || state.owner.studentId !== user.uid) throw new AccessError("That payment could not be found.");
+  return createOrReuseOrder(config, target, state, { studentId: user.uid, guestRegistrationId: null });
+}
+
+/**
+ * Guest checkout: a Razorpay order for a guest registration's initial payment,
+ * authorised by the registration's checkout token (no account exists yet).
+ */
+export async function createOrderForGuest(registrationId: string, token: unknown): Promise<CheckoutOrder> {
+  const config = readRazorpayConfig();
+  if (!config) throw new AccessError("Online payment is not available yet. Please contact the academy.");
+  const registration = await readGuestRegistration(registrationId, token);
+  if (!registration || registration.studentId) throw new AccessError("That registration could not be found.");
+  const target: PaymentTarget = { kind: "registration", registrationId };
+  const state = await db().runTransaction((tx) => readPaymentTarget(tx, target));
+  return createOrReuseOrder(config, target, state, { studentId: null, guestRegistrationId: registrationId });
+}
+
+async function createOrReuseOrder(
+  config: NonNullable<ReturnType<typeof readRazorpayConfig>>,
+  target: PaymentTarget,
+  state: Awaited<ReturnType<typeof readPaymentTarget>>,
+  owner: { studentId: string | null; guestRegistrationId: string | null },
+): Promise<CheckoutOrder> {
   if (state.payableMinor === null) throw new AccessError("Nothing is payable on this item right now.");
   const amountMinor = state.payableMinor;
   const description = state.titleSuffix;
@@ -53,7 +78,8 @@ export async function createOrderForStudent(user: SessionUser, target: PaymentTa
   const reusable = existing.docs.find(
     (d) =>
       d.get("status") === "created" &&
-      d.get("studentId") === user.uid &&
+      (d.get("studentId") ?? null) === owner.studentId &&
+      (d.get("guestRegistrationId") ?? null) === owner.guestRegistrationId &&
       d.get("amountMinor") === amountMinor &&
       Date.now() - (d.get("createdAt")?.toMillis?.() ?? 0) < ORDER_REUSE_MS,
   );
@@ -62,14 +88,15 @@ export async function createOrderForStudent(user: SessionUser, target: PaymentTa
   const order = await createRazorpayOrder(config, {
     amountMinor,
     receipt: key,
-    notes: { target: key, studentId: user.uid },
+    notes: { target: key, ...(owner.studentId ? { studentId: owner.studentId } : { guest: "registration" }) },
   });
   if (order.amount !== amountMinor || order.currency !== "INR") throw new Error("Razorpay returned an unexpected order amount.");
   await col("gatewayOrders").doc(order.id).create({
     targetKey: key,
     target,
     mode: "test",
-    studentId: user.uid,
+    studentId: owner.studentId,
+    guestRegistrationId: owner.guestRegistrationId,
     amountMinor,
     currency: "INR",
     status: "created",
@@ -123,17 +150,20 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
     let needsReview: string | null = null;
     if (state.payableMinor === null) needsReview = "Received after the item was already settled — refund or adjust.";
     else if (input.amountMinor > state.payableMinor) needsReview = "Received more than the outstanding balance — refund or adjust.";
+    // Only invoices take part payments. A fixed amount (first class, session, registration) that changed after checkout opened is never applied short.
+    else if (target.kind !== "invoice" && input.amountMinor < state.payableMinor) needsReview = "Received less than the amount now due (the item changed after checkout) — collect the difference or refund.";
     const record: PaymentRecord = {
       id: paymentDocId,
-      studentId: state.account.studentId,
-      courseId: state.account.courseId,
+      studentId: state.owner.studentId,
+      courseId: state.owner.courseId,
       enrollmentId: "",
       packageId: null,
       purpose: target.kind,
-      accountId: state.account.id,
+      accountId: state.owner.accountId,
       invoiceId: target.kind === "invoice" ? target.invoiceId : null,
       sessionChargeId: target.kind === "session" ? target.chargeId : null,
-      learnerIds: [state.account.studentId],
+      registrationId: target.kind === "registration" ? target.registrationId : null,
+      learnerIds: state.owner.studentId ? [state.owner.studentId] : [],
       payerName: null,
       rejectionReason: null,
       verifiedAt: nowIso,
@@ -156,7 +186,7 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
       updatedAt: nowIso,
       history: [],
     };
-    const receiptCtx = await readReceiptContext(tx, record, null, state.titleSuffix);
+    const receiptCtx = await readReceiptContext(tx, record, null, state.titleSuffix, state.registration?.learnerName);
 
     // ---- writes ----
     if (!needsReview) applyVerifiedPayment(tx, state, paymentDocId, GATEWAY_ACTOR);
@@ -170,6 +200,7 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
       accountId: record.accountId,
       invoiceId: record.invoiceId,
       sessionChargeId: record.sessionChargeId,
+      registrationId: record.registrationId,
       learnerIds: record.learnerIds,
       payerName: null,
       amountMinor: record.amountMinor,
@@ -198,11 +229,27 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
       history: [{ at: Timestamp.now(), by: GATEWAY_ACTOR.uid, byEmail: null, change: `Online payment verified (${input.via})${needsReview ? ` — needs review: ${needsReview}` : ""}` }],
     });
     tx.update(orderRef, { status: "paid", paymentId: input.paymentId, paidAt: FieldValue.serverTimestamp() });
-    return { outcome: "recorded" as const, paymentId: paymentDocId, receiptNumber, needsReview, accountId: state.account.id };
+    return {
+      outcome: "recorded" as const,
+      paymentId: paymentDocId,
+      receiptNumber,
+      needsReview,
+      accountId: state.owner.accountId,
+      registrationId: target.kind === "registration" && !needsReview ? target.registrationId : null,
+    };
   });
   // A verified invoice payment may restore access (idempotent; the scheduled job re-checks too).
   if (result.outcome === "recorded") {
-    await evaluateSuspension(result.accountId, GATEWAY_ACTOR);
+    if (result.accountId) await evaluateSuspension(result.accountId, GATEWAY_ACTOR);
+    // A verified guest registration payment: create (or find) the student account and send the invitation.
+    // Best effort here; the scheduled job retries anything left over.
+    if (result.registrationId) {
+      try {
+        await provisionRegistrationAccount(result.registrationId);
+      } catch (error) {
+        console.error("[gateway] account provisioning will be retried:", (error as Error)?.message);
+      }
+    }
     return { outcome: result.outcome, paymentId: result.paymentId, receiptNumber: result.receiptNumber, needsReview: result.needsReview };
   }
   return result;
@@ -223,9 +270,11 @@ export async function claimWebhookEvent(eventId: string, event: string): Promise
   }
 }
 
-export async function gatewayOrderOwner(orderId: string): Promise<{ studentId: string; createdAt: string | null } | null> {
+export async function gatewayOrderOwner(orderId: string): Promise<{ studentId: string; guestRegistrationId: string | null; createdAt: string | null } | null> {
   const snap = await col("gatewayOrders").doc(orderId).get();
-  return snap.exists ? { studentId: String(snap.get("studentId") ?? ""), createdAt: toIso(snap.get("createdAt")) } : null;
+  return snap.exists
+    ? { studentId: String(snap.get("studentId") ?? ""), guestRegistrationId: (snap.get("guestRegistrationId") as string | null) ?? null, createdAt: toIso(snap.get("createdAt")) }
+    : null;
 }
 
 export interface ConfirmedCheckout {
@@ -257,8 +306,40 @@ export async function confirmCheckoutPayment(
   }
   if (!config) throw new AccessError("Online payment is not available right now.");
   const owner = await gatewayOrderOwner(orderId);
-  if (!owner || owner.studentId !== user.uid) throw new AccessError("The payment could not be verified.");
-  if (!verifyCheckoutSignature(orderId, paymentId, input.signature, config.keySecret)) {
+  if (!owner || !owner.studentId || owner.studentId !== user.uid) throw new AccessError("The payment could not be verified.");
+  return verifyAndRecordCheckout(config, orderId, paymentId, input.signature);
+}
+
+/** Guest checkout confirmation: the order must belong to this guest registration (checkout token). */
+export async function confirmGuestCheckoutPayment(
+  registrationId: string,
+  token: unknown,
+  input: { orderId: unknown; paymentId: unknown; signature: unknown },
+): Promise<ConfirmedCheckout> {
+  const orderId = typeof input?.orderId === "string" && /^order_[A-Za-z0-9]+$/.test(input.orderId) ? input.orderId : null;
+  const paymentId = typeof input?.paymentId === "string" && /^pay_[A-Za-z0-9]+$/.test(input.paymentId) ? input.paymentId : null;
+  if (!orderId || !paymentId) throw new AccessError("The payment could not be verified.");
+  let config: ReturnType<typeof readRazorpayConfig>;
+  try {
+    config = readRazorpayConfig();
+  } catch (error) {
+    if (error instanceof GatewayConfigError) throw new AccessError("Online payment is not available right now.");
+    throw error;
+  }
+  if (!config) throw new AccessError("Online payment is not available right now.");
+  const registration = await readGuestRegistration(registrationId, token);
+  const owner = await gatewayOrderOwner(orderId);
+  if (!registration || !owner || owner.guestRegistrationId !== registrationId) throw new AccessError("The payment could not be verified.");
+  return verifyAndRecordCheckout(config, orderId, paymentId, input.signature);
+}
+
+async function verifyAndRecordCheckout(
+  config: NonNullable<ReturnType<typeof readRazorpayConfig>>,
+  orderId: string,
+  paymentId: string,
+  signature: unknown,
+): Promise<ConfirmedCheckout> {
+  if (!verifyCheckoutSignature(orderId, paymentId, signature, config.keySecret)) {
     throw new AccessError("The payment could not be verified. If money was deducted, it will be confirmed automatically or the academy will contact you.");
   }
   const payment = await fetchRazorpayPayment(config, paymentId);

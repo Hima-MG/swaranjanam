@@ -184,11 +184,9 @@ export function PolicyForm({ policy }: { policy: BillingPolicy }) {
     >
       <fieldset disabled={pending} className="flex flex-col gap-5">
         <Field id="p-student" label="Batch class cancelled by the student" error={e.batchStudentCancelled}>
-          <NativeSelect id="p-student" name="batchStudentCancelled" defaultValue={policy.batchStudentCancelled}>
-            <option value="not_billable">Not billed</option>
-            <option value="billable">Billed (₹400)</option>
-          </NativeSelect>
-          <Pending />
+          {/* Confirmed academy policy: always billed (the recording is provided). */}
+          <input type="hidden" name="batchStudentCancelled" value="billable" />
+          <p className="text-sm text-brown">Billed — the academy provides the recording (confirmed policy).</p>
         </Field>
       </fieldset>
       {error && <FormAlert tone="error">{error}</FormAlert>}

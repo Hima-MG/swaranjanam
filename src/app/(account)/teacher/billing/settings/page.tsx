@@ -34,16 +34,20 @@ async function Settings() {
           <li>Website billing starts with {periodLabel(BILLING_START_PERIOD)}; earlier fees stay with the previous payment method, and old dues must be verified for each student first.</li>
           <li>Batch classes: per class per student. Attended and absent are billed; academy-cancelled, rescheduled and unknown-attendance classes are not.</li>
           <li>
-            First-class payment, collected at enrolment and <strong>non-refundable</strong>: it pays for the student&apos;s first eligible class, which is never invoiced.
-            The first class&apos;s Meet link is withheld until it is verified. It is not refunded if a student stops early.
+            Initial enrolment payment (batch ₹400, individual ₹750), collected at enrolment and <strong>non-refundable</strong>: it pays for the student&apos;s first
+            eligible class/session, which is listed on its monthly invoice with the payment deducted — never charged twice. The first class&apos;s Meet link is withheld
+            until it is verified. It is not refunded if a student stops early.
           </li>
           <li>
-            Four-week cycles from the date of the first class (week 1). Cycle 1 covers classes 2–4 (₹1,200 when all three take place), later cycles four classes
-            (₹1,600) — always only the classes actually held. Each invoice is issued once a class in the cycle&apos;s fourth week is recorded (or at the end of
-            week 4 at the latest) and is due at the end of week 4, 8, 12 … (IST). Unpaid after that → Meet links, lessons and materials pause until the payment
-            is verified.
+            Calendar months (IST). Each invoice is generated on the last calendar day of the month (from 23:00 IST) for the billable classes/sessions actually
+            held and recorded that month — 4, 5 or any number. A class recorded after its month&apos;s invoice goes on the next one. The payment deadline is the
+            end of the 3rd calendar day after the invoice date (30 Nov → 3 Dec, 23:59 IST); there is no restriction before then. Unpaid after the deadline →
+            Meet links, lessons and materials pause until the payment is verified and no other invoice is overdue.
           </li>
-          <li>Individual sessions: paid per session. Cancelled by the student at least 24 hours before → no charge; later → still payable. Academy cancellation → no charge.</li>
+          <li>
+            Individual sessions: ₹750 per session on the monthly invoice. Attended or absent → billable; cancelled by the student → billable (the academy provides the recording); academy cancellation or rescheduling → no charge; unknown attendance → not billed. Sessions scheduled earlier with their own
+            per-session charge are still paid one at a time and never added to a monthly invoice.
+          </li>
         </ul>
       </section>
 

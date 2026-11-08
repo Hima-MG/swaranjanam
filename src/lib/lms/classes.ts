@@ -66,6 +66,8 @@ export interface LiveClassRecord {
   attendance: Attendance | null;
   outcomeNote: string | null;
   outcomeRecordedAt: string | null;
+  /** Validated YouTube video id of the class recording (teacher view; students get it only via the enrolment-checked recordings reader). */
+  recordingVideoId: string | null;
   createdBy: string | null;
   createdByEmail: string | null;
   createdAt: string | null;

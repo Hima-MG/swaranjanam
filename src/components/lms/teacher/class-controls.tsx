@@ -173,7 +173,7 @@ export function ClassFormDialog({
               id={`c-billingAccountId-${id}`}
               label="Billing"
               error={e.billingAccountId}
-              hint="An individual session is charged ₹750 and paid separately. Cancelled by the student at least 24 hours before: no charge."
+              hint="An individual session is billed on the monthly invoice. Cancelled by the student: still billed (the recording is provided). Cancelled by the academy: not billed."
             >
               <NativeSelect id={`c-billingAccountId-${id}`} name="billingAccountId" defaultValue={studentAccounts[0].id}>
                 {studentAccounts.map((a) => (
@@ -260,7 +260,7 @@ export function CancelClassDialog({ classId, title, when, shared = false }: { cl
               {label}
             </label>
           ))}
-          <p className="text-xs text-muted-foreground">Academy cancellations and reschedules are never charged. A one-to-one session cancelled by the student less than 24 hours before the start stays payable (checked on the server in IST). Student cancellations in a batch follow the billing policy setting.</p>
+          <p className="text-xs text-muted-foreground">Academy cancellations and reschedules are never charged. A class cancelled by the student (batch or one-to-one) stays billable; share the recording with the student.</p>
         </fieldset>
         <Field id={`cancel-reason-${classId}`} label="Reason (optional, shown to the student)">
           <Input id={`cancel-reason-${classId}`} name="reason" maxLength={300} disabled={pending} />

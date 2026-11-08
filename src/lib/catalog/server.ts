@@ -16,10 +16,11 @@ import type { Course, CourseCategory, CourseDetail } from "@/types/course";
 // * Courses: published Firestore courses whose availability a teacher has set,
 //   plus the academy's approved catalogue for any approved course that does
 //   not exist in Firestore yet (lib/catalog/public-catalog.ts).
-// * Fees: the academy's per-session billing rates in force
-//   (settings/classBilling, Teacher → Billing → Rates & policy) — the same
-//   rates batch invoices use. Never the legacy course.price, never legacy
-//   package plans, never a student's agreed fee.
+// * Fees: each course's OWN rates (course pricing, Teacher → Courses → Classes &
+//   pricing). A course saved before course pricing existed, and an approved-
+//   catalogue course, uses the academy's confirmed rates in force
+//   (settings/classBilling). Never the legacy course.price, never legacy package
+//   plans, never a student's agreed rate.
 // * Only catalogue fields and module/lesson TITLES leave this module — never
 //   lesson resources, teacher ids, enrolments or payments.
 // * Results are cached ("use cache") under CATALOG_TAG. Teacher mutations
@@ -33,7 +34,7 @@ function logFailure(label: string, error: unknown) {
   console.error(`[catalog] ${label} failed:`, (error as Error)?.name, (error as Error)?.message);
 }
 
-/** The per-session fees in force this month (IST), from the billing rates. */
+/** The academy's confirmed rates in force this month (IST) — for courses without their own pricing. */
 async function currentPublicFees(): Promise<PublicCourseFees> {
   const config = await getClassBillingConfig();
   return publicFeesFromRate(rateVersionForPeriod(config.rateVersions, periodOf(new Date().toISOString())));
@@ -74,14 +75,19 @@ export async function getPublishedCourses(): Promise<CatalogResult<Course[]>> {
   }
 }
 
-/** Current per-session fees for the homepage fee summary. Null when they cannot be loaded. */
+/**
+ * Fees for the homepage summary and FAQ: the rates shared by EVERY open course,
+ * or null when courses are priced differently (each course card then shows its
+ * own rates) or the catalogue cannot be loaded.
+ */
 export async function getPublicFees(): Promise<PublicCourseFees | null> {
   "use cache";
   cacheTag(CATALOG_TAG);
   try {
-    const fees = await currentPublicFees();
+    const fees = (await readCatalog()).filter((c) => c.availability === "open" && c.fee).map((c) => c.fee!);
+    const shared = fees.length > 0 && fees.every((f) => JSON.stringify(f) === JSON.stringify(fees[0])) ? fees[0] : null;
     cacheLife("hours");
-    return fees;
+    return shared;
   } catch (error) {
     logFailure("getPublicFees", error);
     cacheLife("seconds");

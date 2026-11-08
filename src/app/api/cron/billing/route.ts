@@ -3,11 +3,14 @@ import { timingSafeEqual } from "node:crypto";
 import { connection } from "next/server";
 
 import { runScheduledBilling } from "@/lib/lms/server/class-billing";
+import { provisionPendingRegistrations } from "@/lib/lms/server/guest-enrolment";
 
 /**
- * Scheduled billing job (Vercel Cron, see vercel.json; daily at 00:30 IST).
- *  1. Creates missing monthly batch invoices for completed months (IST).
- *  2. Suspends accounts with an invoice unpaid after its payment deadline,
+ * Scheduled billing job (Vercel Cron, see vercel.json; daily at 23:30 IST).
+ *  1. On the last calendar day of a month (from 23:00 IST), creates that month's
+ *     invoice for every batch and individual account with billable classes.
+ *  2. Retries student-account provisioning for verified guest registrations.
+ *  3. Suspends accounts with an invoice unpaid after its payment deadline,
  *     and restores accounts whose overdue invoices are now paid.
  * Idempotent: running it again (or concurrently) never duplicates anything.
  *
@@ -24,5 +27,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   const summary = await runScheduledBilling({ uid: "scheduler", email: null });
-  return Response.json({ ok: summary.errors === 0, ...summary }, { status: summary.errors ? 500 : 200 });
+  const accounts = await provisionPendingRegistrations();
+  const errors = summary.errors + accounts.errors;
+  return Response.json({ ok: errors === 0, ...summary, accountsProvisioned: accounts.attempted, errors }, { status: errors ? 500 : 200 });
 }

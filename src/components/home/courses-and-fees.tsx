@@ -22,7 +22,7 @@ export function CoursesAndFees({ catalog, fee }: { catalog: CatalogResult<Course
         align="left"
         eyebrow="Courses & fees"
         title="Learn at your own pace, pay per class"
-        description="One-hour live classes on Google Meet, once a week, in small batches. Fees are per session: your first batch class is paid when you enrol, then you are invoiced every four weeks for the classes held — never a course fee upfront. Choose an open course and select “Enrol now”."
+        description="One-hour live classes on Google Meet, once a week, in small batches. Fees are per session: your first class is paid when you enrol (and deducted on your first invoice), then you are invoiced at the end of each calendar month for the classes held — never a course fee upfront. Open a course to see what it covers and select “Enrol Now”."
       />
 
       {fee && <FeeSummary fee={fee} className="mb-12" />}

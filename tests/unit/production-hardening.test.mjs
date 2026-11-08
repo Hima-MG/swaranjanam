@@ -99,8 +99,8 @@ describe("batch enrolment advance is non-refundable", () => {
     }
     for (const reason of ADVANCE_CORRECTION_REASONS) assert.equal(advanceReversalError({ reason, appliedMinor: 0 }), null, reason);
   });
-  test("an advance already applied to an invoice cannot be reversed at all", () => {
-    assert.match(advanceReversalError({ reason: "duplicate_payment", appliedMinor: 40_000 }), /already been applied/);
+  test("an initial payment already deducted on a monthly invoice cannot be reversed at all", () => {
+    assert.match(advanceReversalError({ reason: "duplicate_payment", appliedMinor: 40_000 }), /already been deducted/);
   });
   test("the server action enforces it and records the reversal in the advance ledger", () => {
     const src = read("src/app/(account)/teacher/payment-actions.ts");

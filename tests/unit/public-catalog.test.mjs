@@ -43,12 +43,12 @@ describe("public fees come from the billing rates in force", () => {
     assert.equal(discounted(40_000, 10), 36_000);
     assert.equal(discounted(41_500, 10), 37_400); // ₹373.50 → ₹374
   });
-  test("payment terms are per session, monthly, no registration fee, no fixed duration — and no unconfirmed policy", () => {
+  test("payment terms are per session, first class at enrolment (deducted once), calendar-month invoices due in 3 days, no registration fee, no fixed duration — and no unconfirmed policy", () => {
     const text = FEE_TERMS.join(" ");
-    for (const phrase of [/per session/, /end of each month/, /one week to pay/, /No registration fee/, /no fixed course duration/]) assert.match(text, phrase);
+    for (const phrase of [/per session/, /first class or session is paid when you enrol/, /deducted on your first monthly invoice/, /never charged twice/, /last day of each calendar month/, /within 3 days/, /No registration fee/, /no fixed course duration/]) assert.match(text, phrase);
     // Refunds, academy cancellations, rescheduling and leaving are still "suggested" in the workbook.
     assert.doesNotMatch(text, /refund|reschedul|cancel|leave|leaving/i);
-    assert.doesNotMatch(text, /upfront|package|bundle|4 classes|four classes/i);
+    assert.doesNotMatch(text, /upfront|package|bundle|four weeks|classes 2–4/i);
   });
 });
 
@@ -171,31 +171,45 @@ describe("website enrolment journey", () => {
       assert.doesNotMatch(src, /₹360|10% off|siblingBatchMinor/, f);
     }
   });
-  test("open courses link to the signed-in enrolment page; coming-soon courses do not", () => {
+  test("course cards open the details page (per-session rates only, no enrol button); only open courses offer Enrol Now there", () => {
     const card = read("src/components/course/course-card.tsx");
-    assert.match(card, /course\.availability === "open" && \(\s*\/\/[^\n]*\n\s*<Link\s+href=\{`\/dashboard\/enrol\/\$\{course\.slug\}`\}/);
+    assert.match(card, /const href = `\/courses\/\$\{course\.slug\}`/);
+    assert.doesNotMatch(card, /\/dashboard\/enrol|course\.price|totalFee/);
     const detail = read("src/app/(public)/courses/[slug]/page.tsx");
-    assert.match(detail, /\{open \? \([\s\S]*?\/dashboard\/enrol\/\$\{course\.slug\}[\s\S]*?\) : \(/);
+    assert.match(detail, /\{open \? \([\s\S]*?\/enrol\/\$\{course\.slug\}`\}>Enrol Now[\s\S]*?\) : \(/);
+    // Guests can enrol; signed-in students are sent to their dashboard enrolment.
+    assert.match(read("src/app/(public)/enrol/[slug]/page.tsx"), /if \(user\?\.role === "student"\) redirect\(`\/dashboard\/enrol\//);
   });
   test("the enrolment page requires a student session and pays only through the existing Razorpay button", () => {
     const page = read("src/app/(account)/dashboard/enrol/[slug]/page.tsx");
     assert.match(page, /await requireRole\("student", `\/dashboard\/enrol\//);
-    assert.match(page, /<PayOnlineButton kind="advance" id=\{state\.batch\.id\}/);
+    assert.match(page, /<PayOnlineButton kind="registration" id=\{r\.id\}/);
+    assert.match(page, /r\.status === "pending_payment"/);
     assert.match(page, /course\.availability !== "open"/);
+    assert.match(page, /preferred days and times are requests, not a confirmed booking/);
     assert.doesNotMatch(page, /razorpay\.com|RAZORPAY_|createRazorpayOrder|processVerifiedGatewayPayment/);
   });
-  test("the request action is student-only and creates no billing records", () => {
-    const action = read("src/app/(account)/dashboard/enrolment-actions.ts");
+  test("the registration action is student-only, computes the amount on the server and records no payment", () => {
+    const action = read("src/app/(account)/dashboard/registration-actions.ts");
     assert.match(action, /requireActionUser\("student"\)/);
-    const server = read("src/lib/lms/server/enrolment.ts").replace(/\/\/[^\n]*/g, "");
-    assert.doesNotMatch(server, /billingAccounts"\)\.doc\([^)]*\)\.(set|create|update)|tx\.(set|create|update)\(accountRef|col\("payments"\)|gatewayOrders|createRazorpayOrder/);
+    const server = read("src/lib/lms/server/registrations.ts").replace(/\/\/[^\n]*/g, "");
+    const save = server.slice(server.indexOf("export async function saveRegistration"), server.indexOf("export async function getOwnRegistration"));
+    // The price comes from the server (course rate, or the fixed Learn Together rates); the initial payment is one session.
+    assert.match(save, /const priced = priceEnrolment\(course, input\?\.mode\);/);
+    assert.match(save, /course\.fee\?\.batchMinor : course\.fee\?\.individualMinor/);
+    assert.match(save, /initialAmountMinor: priced\.sessionMinor/);
+    assert.doesNotMatch(save, /col\("payments"\)|gatewayOrders|createRazorpayOrder|status: "paid"|tx\.(set|create|update)\(accountRefs/);
+    const teacher = read("src/app/(account)/teacher/registration-actions.ts");
+    assert.equal((teacher.match(/requireActionUser\("teacher"\)/g) ?? []).length, 3);
   });
   test("checkout confirmation is a single implementation shared by the action (no parallel payment code)", () => {
     const action = read("src/app/(account)/dashboard/payment-actions.ts");
     assert.match(action, /confirmCheckoutPayment\(user, input\)/);
     assert.doesNotMatch(action, /verifyCheckoutSignature|fetchRazorpayPayment|processVerifiedGatewayPayment/);
     const gateway = read("src/lib/lms/server/gateway.ts");
-    assert.match(gateway, /verifyCheckoutSignature\(orderId, paymentId, input\.signature, config\.keySecret\)/);
+    assert.match(gateway, /verifyCheckoutSignature\(orderId, paymentId, signature, config\.keySecret\)/);
+    // Student and guest confirmations both go through the one shared verification.
+    assert.equal((gateway.match(/return verifyAndRecordCheckout\(config, orderId, paymentId, input\.signature\)/g) ?? []).length, 2);
   });
   test("login and register keep the enrolment page as the return path", () => {
     assert.match(read("src/components/auth/auth-shell.tsx"), /<AuthSwitchLink href=\{footer\.href\}/);

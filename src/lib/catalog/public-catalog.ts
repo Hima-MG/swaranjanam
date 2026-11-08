@@ -9,12 +9,16 @@
 // A published course without an availability setting (e.g. migrated template
 // content that nobody has reviewed) is not listed publicly.
 //
-// Fees: "open" courses get the academy's current per-session fees;
-// "coming_soon" courses get null ("Fees to be announced"). Nothing
-// student-specific (agreed fees, enrolments, payments) is ever included.
+// Fees: "open" courses get their OWN rates (course pricing, only the class
+// types the course offers); a course saved before course pricing existed, and
+// an approved-catalogue course, uses the academy's confirmed rates in force.
+// "coming_soon" and "closed" courses get null. Nothing student-specific
+// (agreed rates, enrolments, payments) is ever included.
 
+import { toPublicProgramme } from "@/lib/lms/programme";
 import type { ApprovedCourse } from "@/data/approved-courses";
-import type { PublicCourseFees } from "@/lib/catalog/public-pricing";
+import { publicFeesFromPricing, type PublicCourseFees } from "@/lib/catalog/public-pricing";
+import { effectiveCoursePricing } from "@/lib/lms/course-pricing";
 import type { CourseRecord } from "@/lib/lms/types";
 import type { Course, CourseTone } from "@/types/course";
 
@@ -33,9 +37,15 @@ export interface FirestoreCatalogEntry {
   lessonCount: number;
 }
 
+/** The confirmed rates in force, for courses without their own saved pricing. */
+function confirmedRates(fees: PublicCourseFees) {
+  return { batchMinor: fees.batchMinor ?? 0, individualMinor: fees.individualMinor ?? 0 };
+}
+
 export function fromFirestore(entry: FirestoreCatalogEntry, fees: PublicCourseFees): Course | null {
   const { record: c } = entry;
   if (c.status !== "published" || !c.availability) return null;
+  const pricing = effectiveCoursePricing(c.storedPricing, confirmedRates(fees));
   return {
     id: c.id,
     slug: c.slug,
@@ -53,7 +63,9 @@ export function fromFirestore(entry: FirestoreCatalogEntry, fees: PublicCourseFe
     ageGroup: c.ageGroup,
     instructor: c.instructor,
     availability: c.availability,
-    fee: c.availability === "open" ? fees : null,
+    fee: c.availability === "open" && !c.programme ? publicFeesFromPricing(pricing) : null,
+    programme: c.programme ? toPublicProgramme(c.programme) : null,
+    prerequisites: c.prerequisites,
     source: "firestore",
     tag: c.tag,
     featured: c.featured,
@@ -83,7 +95,9 @@ export function fromApproved(a: ApprovedCourse, fees: PublicCourseFees): Course 
     ageGroup: a.audience,
     instructor: "",
     availability: a.availability,
-    fee: a.availability === "open" ? fees : null,
+    fee: a.availability === "open" ? publicFeesFromPricing(effectiveCoursePricing(null, confirmedRates(fees))) : null,
+    programme: null,
+    prerequisites: [],
     source: "approved",
     tag: null,
     featured: a.featured,

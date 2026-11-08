@@ -1,3 +1,4 @@
+import type { PublicProgramme } from "@/lib/lms/programme";
 import type { PublicCourseFees } from "@/lib/catalog/public-pricing";
 
 // Course taxonomy (the option lists teachers choose from) and the public
@@ -17,16 +18,20 @@ export const COURSE_TAGS = ["Bestseller", "New", "Popular", "Limited Seats"] as 
 export type CourseTag = (typeof COURSE_TAGS)[number];
 
 /**
- * Public enrolment status, set by a teacher in "Catalogue details".
- * "open" courses show the academy's current per-session fees; "coming_soon"
- * courses show "Fees to be announced" and cannot be enrolled in. A published
- * course with no availability set is not listed on the public website.
+ * Public enrolment status, set by a teacher in "Catalogue details" (a draft
+ * course is never public, whatever this says):
+ *  * "open"        — public, with the course's own per-class/per-session rates and Enrol Now;
+ *  * "coming_soon" — public, "Fees to be announced", no enrolment or payment;
+ *  * "closed"      — public details stay visible; no new enrolments (existing
+ *                    students continue under their enrolment and billing records).
+ * A published course with no availability set is not listed on the public website.
  */
-export const COURSE_AVAILABILITY = ["open", "coming_soon"] as const;
+export const COURSE_AVAILABILITY = ["open", "coming_soon", "closed"] as const;
 export type CourseAvailability = (typeof COURSE_AVAILABILITY)[number];
 export const COURSE_AVAILABILITY_LABELS: Record<CourseAvailability, string> = {
   open: "Open for enrolment",
   coming_soon: "Coming soon",
+  closed: "Closed for enrolment",
 };
 
 /** Visual palette for the generated placeholder thumbnail. */
@@ -52,12 +57,16 @@ export interface Course {
   instructor: string;
   availability: CourseAvailability;
   /**
-   * The academy's current per-session fees (from the billing rates in force)
-   * for an "open" course; null for "coming_soon" ("Fees to be announced").
-   * The legacy course.price field and student-specific agreed fees are never
-   * part of the public course.
+   * The course's OWN per-class / per-session rates for an "open" course (null
+   * for a class type the course does not offer); null for "coming_soon" and
+   * "closed". The legacy course.price field and student-specific agreed rates
+   * are never part of the public course.
    */
   fee: PublicCourseFees | null;
+  /** Special Programme (full fee, one payment); null = Regular Academy Course. */
+  programme: PublicProgramme | null;
+  /** What learners should already know (public). */
+  prerequisites: string[];
   /** "approved" = the academy's approved catalogue, used until the course exists in Firestore. */
   source: "firestore" | "approved";
   tag: CourseTag | null;

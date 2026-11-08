@@ -53,10 +53,12 @@ export interface RecordPaymentInput {
   packageId?: unknown;
   /** Class-based billing: the one-time registration advance of this billing account. */
   advanceAccountId?: unknown;
-  /** Class-based billing: a batch invoice (four-week cycle). */
+  /** Class-based billing: a monthly invoice (batch or individual). */
   invoiceId?: unknown;
-  /** Class-based billing: one individual session (₹750, paid separately). Exactly one target in total. */
+  /** Class-based billing: one individual session (₹750, paid separately). */
   sessionChargeId?: unknown;
+  /** Website registration: the initial payment (₹400 batch / ₹750 individual). Exactly one target in total. */
+  registrationId?: unknown;
   amount: unknown;
   method: unknown;
   reference: unknown;
@@ -92,7 +94,8 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
     const advanceAccountId = isValidId(input?.advanceAccountId) ? input.advanceAccountId : null;
     const invoiceId = isValidId(input?.invoiceId) ? input.invoiceId : null;
     const sessionChargeId = isValidId(input?.sessionChargeId) ? input.sessionChargeId : null;
-    const targetCount = [enrollmentId, packageId, advanceAccountId, invoiceId, sessionChargeId].filter(Boolean).length;
+    const registrationId = isValidId(input?.registrationId) ? input.registrationId : null;
+    const targetCount = [enrollmentId, packageId, advanceAccountId, invoiceId, sessionChargeId, registrationId].filter(Boolean).length;
     const packageBlocked = packageId ? legacyPackageBlock("record_payment") : null;
     if (packageBlocked) throw new AccessError(packageBlocked, { target: "Legacy package (read-only)." });
     if (targetCount === 0) errors.target = "Choose what this payment is for.";
@@ -103,7 +106,9 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
         ? { kind: "invoice", invoiceId }
         : sessionChargeId
           ? { kind: "session", chargeId: sessionChargeId }
-          : null;
+          : registrationId
+            ? { kind: "registration", registrationId }
+            : null;
     const amountMinor = parseAmountMinor(input?.amount);
     if (amountMinor === null) errors.amount = "Enter an amount greater than zero (up to 2 decimal places).";
     const settings = await getBillingSettings();
@@ -149,33 +154,36 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
             throw new AccessError(
               billingTarget.kind === "advance"
                 ? "No advance is payable on this account (already received, applied or not required)."
-                : billingTarget.kind === "session"
+                : billingTarget.kind === "registration"
+                  ? "This registration's initial payment has already been received."
+                  : billingTarget.kind === "session"
                   ? "This session is not payable (already paid, or cancelled without charge)."
                   : "This invoice is not payable (void or already paid).",
               { target: "Nothing payable." },
             );
           }
-          if ((billingTarget.kind === "advance" || billingTarget.kind === "session") && amountMinor !== billing.payableMinor) {
-            throw new AccessError("Please fix the highlighted fields.", {
-              amount: `The ${billingTarget.kind === "advance" ? "advance" : "session fee"} is exactly ₹${paiseToRupeesText(billing.payableMinor)}.`,
-            });
+          if (billingTarget.kind !== "invoice" && amountMinor !== billing.payableMinor) {
+            const what = billingTarget.kind === "advance" ? "advance" : billingTarget.kind === "registration" ? "initial payment" : "session fee";
+            throw new AccessError("Please fix the highlighted fields.", { amount: `The ${what} is exactly ₹${paiseToRupeesText(billing.payableMinor)}.` });
           }
           if (billingTarget.kind === "invoice" && amountMinor! > billing.payableMinor) {
             throw new AccessError("Please fix the highlighted fields.", { amount: `At most ₹${paiseToRupeesText(billing.payableMinor)} is outstanding on this invoice.` });
           }
         }
         target = {
-          studentId: billing.account.studentId,
-          courseId: billing.account.courseId,
+          studentId: billing.owner.studentId,
+          courseId: billing.owner.courseId,
           enrollmentId: "",
-          learnerIds: [billing.account.studentId],
+          learnerIds: [billing.owner.studentId],
           currency: "INR",
           label:
             billingTarget.kind === "advance"
-              ? `advance for account ${billing.account.id}`
+              ? `advance for account ${billing.owner.accountId}`
               : billingTarget.kind === "session"
                 ? `session charge ${billingTarget.chargeId}`
-                : `invoice ${billingTarget.invoiceId}`,
+                : billingTarget.kind === "registration"
+                  ? `registration ${billingTarget.registrationId}`
+                  : `invoice ${billingTarget.invoiceId}`,
         };
       } else if (packageId) {
         pkgData = await readPackageInTx(tx, packageId);
@@ -209,9 +217,10 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
         enrollmentId: target.enrollmentId,
         packageId,
         purpose: billingTarget ? billingTarget.kind : null,
-        accountId: billing ? billing.account.id : null,
+        accountId: billing ? billing.owner.accountId : null,
         invoiceId: billingTarget?.kind === "invoice" ? billingTarget.invoiceId : null,
         sessionChargeId: billingTarget?.kind === "session" ? billingTarget.chargeId : null,
+        registrationId: billingTarget?.kind === "registration" ? billingTarget.registrationId : null,
         learnerIds: target.learnerIds,
         payerName,
         rejectionReason: status === "failed" ? rejectionReason : null,
@@ -250,6 +259,7 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
         accountId: record.accountId,
         invoiceId: record.invoiceId,
         sessionChargeId: record.sessionChargeId,
+        registrationId: record.registrationId,
         learnerIds: record.learnerIds,
         payerName,
         amountMinor: record.amountMinor,
@@ -294,7 +304,7 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
           ),
         });
       }
-      return { label: target.label, receiptNumber, accountId: billing?.account.id ?? null };
+      return { label: target.label, receiptNumber, accountId: billing?.owner.accountId ?? null };
     });
     // A verified invoice payment may lift a suspension (idempotent; the scheduled job re-checks too).
     if (result.accountId && status === "paid") await evaluateSuspension(result.accountId, user);
@@ -357,15 +367,23 @@ export async function updatePaymentStatus(
             ? await readPaymentTarget(tx, { kind: "invoice", invoiceId: payment.invoiceId })
             : payment.purpose === "session" && payment.sessionChargeId
               ? await readPaymentTarget(tx, { kind: "session", chargeId: payment.sessionChargeId })
-              : null;
+              : payment.purpose === "registration" && payment.registrationId
+                ? await readPaymentTarget(tx, { kind: "registration", registrationId: payment.registrationId })
+                : null;
       if (billing && target === "paid" && billing.target.kind === "invoice") {
         if (billing.payableMinor === null || payment.amountMinor > billing.payableMinor) {
           throw new AccessError("Verifying this payment would exceed the invoice's outstanding balance. Check the invoice first.");
         }
       }
-      const advanceCorrection = billing?.target.kind === "advance" && target === "refunded";
+      // The initial registration payment (₹400 first-class payment / first individual session) is also non-refundable:
+      // it can only be reversed to correct a payment mistake, and only before the student has been placed.
+      const registrationCorrection = billing?.target.kind === "registration" && target === "refunded";
+      if (registrationCorrection && billing.registration?.status !== "paid") {
+        throw new AccessError("This student has already been placed. Correct the payment on their billing account instead.");
+      }
+      const advanceCorrection = (billing?.target.kind === "advance" || registrationCorrection) && target === "refunded";
       if (advanceCorrection) {
-        const appliedMinor = billing.account.advance.paymentId === payment.id ? billing.account.advance.appliedMinor : 0;
+        const appliedMinor = billing.account && billing.account.advance.paymentId === payment.id ? billing.account.advance.appliedMinor : 0;
         const blocked = advanceReversalError({ reason: correctionReason, appliedMinor });
         if (blocked) throw new AccessError(blocked, { correctionReason: blocked });
       }
@@ -396,7 +414,17 @@ export async function updatePaymentStatus(
           history: FieldValue.arrayUnion(historyEntry(user, `Session payment refunded: ${note}`)),
         });
       }
-      if (billing && billing.target.kind === "advance" && target === "refunded" && billing.account.advance.paymentId === payment.id) {
+      if (registrationCorrection && billing?.registration) {
+        // The registration goes back to awaiting its initial payment (nothing else was created yet).
+        tx.update(billing.registration.ref, {
+          status: "pending_payment",
+          paymentId: null,
+          paidAt: null,
+          updatedAt: FieldValue.serverTimestamp(),
+          history: FieldValue.arrayUnion(historyEntry(user, `Initial payment reversed (payment error: ${correctionLabel}): ${note}`)),
+        });
+      }
+      if (billing?.account && billing.accountRef && billing.target.kind === "advance" && target === "refunded" && billing.account.advance.paymentId === payment.id) {
         // The advance is no longer received; the account goes back to awaiting it.
         tx.update(billing.accountRef, {
           "advance.status": "awaiting",
@@ -405,7 +433,7 @@ export async function updatePaymentStatus(
         });
         tx.create(col("advanceLedger").doc(), {
           accountId: billing.account.id,
-          studentId: billing.account.studentId,
+          studentId: billing.owner.studentId,
           kind: "reversed",
           reason: correctionReason,
           amountMinor: payment.amountMinor,
@@ -447,7 +475,7 @@ export async function updatePaymentStatus(
           ),
         });
       }
-      return { text: `Payment ${ref.id}: ${change}${receiptNumber ? ` — receipt ${receiptNumber}` : ""}`, accountId: billing?.account.id ?? null };
+      return { text: `Payment ${ref.id}: ${change}${receiptNumber ? ` — receipt ${receiptNumber}` : ""}`, accountId: billing?.owner.accountId ?? null };
     });
     if (summary.accountId) await evaluateSuspension(summary.accountId, user);
 

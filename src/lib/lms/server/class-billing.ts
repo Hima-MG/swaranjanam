@@ -5,28 +5,31 @@ import { FieldValue, Timestamp, type DocumentData, type DocumentReference, type 
 import type { SessionUser } from "@/lib/auth/session";
 import {
   ADVANCE_STATUSES,
-  batchClassBlock,
   BILLING_MODES,
+  BILLING_START_PERIOD,
   CLASS_OUTCOMES,
-  cycleCheckpoint,
-  cycleInvoiceId,
-  cycleLines,
-  cycleReady,
-  cycleStartMs,
+  classAccessBlock,
+  closablePeriod,
   cycleWeeksLabel,
   DEFAULT_POLICY,
   DEFAULT_RATE_VERSION,
+  FREE_CANCELLATION_HOURS,
   individualCancellationCharge,
   invoiceDueState,
-  istDateOf,
   INVOICE_ADJUSTMENT_KINDS,
   INVOICE_STATUSES,
   invoiceDueAt,
   isBatchBillable,
+  isIndividualBillable,
   isPeriod,
   isWebsiteBilledPeriod,
   LEGACY_DUES_STATUSES,
   legacyDuesCleared,
+  monthAmounts,
+  monthLines,
+  monthlyInvoiceDate,
+  monthlyInvoiceId,
+  monthlyPaymentDeadline,
   parsePolicy,
   payableAmount,
   paymentDeadline,
@@ -51,26 +54,31 @@ import {
   type SessionChargeStatus,
 } from "@/lib/lms/class-billing";
 import type { LiveClassRecord } from "@/lib/lms/classes";
+import { agreedRateForPeriod, effectiveCoursePricing, mapAgreedRates, rateFor, type AgreedRate } from "@/lib/lms/course-pricing";
 import { AccessError } from "@/lib/lms/server/access";
 import { col, db, toIso } from "@/lib/lms/server/db";
 import { mapPayment } from "@/lib/lms/server/payments";
-import type { PaymentRecord } from "@/lib/lms/types";
+import { enrollmentId, type PaymentRecord } from "@/lib/lms/types";
 import { isValidId } from "@/lib/lms/validation";
 
-// Class-based billing: four-week batch cycles and per-session individual charges.
+// Class-based billing: calendar-month invoices for batch classes and individual
+// sessions (rules: lib/lms/class-billing.ts).
 //
 // Safeguards (all inside Firestore transactions):
-//   * billableClasses/{classId} is created once → a batch class occurrence is
-//     charged at most once per student.
-//   * The account's first eligible class is marked coveredBy: "advance" — it is
-//     paid by the first-class payment and never put on an invoice.
-//   * invoices/{accountId}_c{cycle} is created once and account.cyclesIssued
-//     only moves forward → re-running the job (or two runs at once) never
-//     duplicates an invoice. The charges an invoice takes are marked with its id
-//     in the same transaction, so a class can never appear on two invoices.
-//   * sessionCharges/sc_{classId} is created once per individual session →
-//     rescheduling (editing the time) can never create a second charge.
+//   * billableClasses/{classId} is created once → a class occurrence is charged
+//     at most once per student.
+//   * The account's first eligible class/session is marked coveredBy: "advance";
+//     the initial enrolment payment is deducted on the invoice that lists it, and
+//     the account's advance becomes "applied" in the same transaction — it can
+//     never be deducted twice.
+//   * invoices/{accountId}_m{YYYY-MM} is created once → re-running the job (or two
+//     runs at once) never duplicates an invoice. The charges an invoice takes are
+//     marked with its id in the same transaction, so a class can never appear on
+//     two invoices.
 //   * Issued invoices are never edited; corrections are invoiceAdjustments.
+//   * History is kept as it is: four-week cycle invoices, first-model monthly
+//     invoices and per-session charges (sessionCharges, still payable per session;
+//     a session with such a charge is never billed again on a monthly invoice).
 //   * Classes before November 2026 are never charged here (old payment method).
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : null);
@@ -115,6 +123,26 @@ export async function getClassBillingConfig(): Promise<ClassBillingConfig> {
   return mapConfig(await classBillingConfigRef().get());
 }
 
+/**
+ * The course's current rate for a class type, read inside a transaction (reads
+ * only): the course's own pricing, or — for a course saved before course pricing
+ * existed — the confirmed rates in force. Throws when the course does not offer
+ * that class type. Used once, when a student's billing account is opened: the
+ * result is stored on the account as the student's agreed rate.
+ */
+export async function courseRateInTx(tx: Transaction, courseId: string, mode: BillingMode): Promise<number> {
+  const [courseSnap, configSnap] = await Promise.all([tx.get(col("courses").doc(courseId)), tx.get(classBillingConfigRef())]);
+  const version = rateVersionForPeriod(mapConfig(configSnap).rateVersions, periodOf(new Date().toISOString()));
+  const rate = rateFor(effectiveCoursePricing(courseSnap.get("pricing"), version), mode);
+  if (!rate) throw new AccessError(`${mode === "batch" ? "Batch" : "Individual"} classes are not offered for this course.`);
+  return rate;
+}
+
+/** The immutable starting entry of a student's agreed rate (applies from the start of website billing). */
+export function initialAgreedRates(rateMinor: number): AgreedRate[] {
+  return [{ effectiveFrom: BILLING_START_PERIOD, rateMinor }];
+}
+
 // --- Records ----------------------------------------------------------------------------------------
 
 export interface Suspension {
@@ -133,13 +161,21 @@ export interface BillingAccountRecord {
   batchId: string | null;
   advance: AdvanceState;
   suspension: Suspension;
+  /**
+   * The student's agreed rate history (per class / per session), fixed when the
+   * account was opened; changed only by an approved change from a future month.
+   * Empty for accounts opened before course pricing (they use the versioned rates).
+   */
+  agreedRates: AgreedRate[];
+  /** 2 for Learn Together (two learners, one login); the agreed rate is then per session for both. */
+  learnerCount: number;
+  learnerNames: string[];
+  /** Learn Together: the per-learner rate (agreedRates holds the session total). Null otherwise. */
+  perLearnerRateMinor: number | null;
   billableCount: number;
-  /** IST date of the first eligible class (start of week 1); null until a class is charged. */
-  cycleAnchor: string | null;
+  /** The first eligible class/session (covered by the initial enrolment payment); null until one is charged. */
   firstClassId: string | null;
   firstClassStartAt: string | null;
-  /** Highest cycle already invoiced (or found empty); the next invoice is for cyclesIssued + 1. */
-  cyclesIssued: number;
   studentName: string;
   courseTitle: string;
   closedReason: string | null;
@@ -171,11 +207,13 @@ export function mapAccount(snapshot: DocumentSnapshot<DocumentData>): BillingAcc
       invoiceIds: Array.isArray(s.invoiceIds) ? s.invoiceIds.map(String) : [],
       liftedAt: toIso(s.liftedAt),
     },
+    agreedRates: mapAgreedRates(d.agreedRates),
+    learnerCount: d.learnerCount === 2 ? 2 : 1,
+    learnerNames: Array.isArray(d.learnerNames) && d.learnerNames.length ? d.learnerNames.map(String) : [String(d.studentName ?? "Student")],
+    perLearnerRateMinor: typeof d.perLearnerRateMinor === "number" && d.perLearnerRateMinor > 0 ? d.perLearnerRateMinor : null,
     billableCount: int(d.billableCount),
-    cycleAnchor: typeof d.cycleAnchor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.cycleAnchor) ? d.cycleAnchor : null,
     firstClassId: str(d.firstClassId),
     firstClassStartAt: toIso(d.firstClassStartAt),
-    cyclesIssued: int(d.cyclesIssued),
     studentName: String(d.studentName ?? "Student"),
     courseTitle: String(d.courseTitle ?? "Course"),
     closedReason: str(d.closedReason),
@@ -188,22 +226,33 @@ export function mapAccount(snapshot: DocumentSnapshot<DocumentData>): BillingAcc
 
 export interface InvoiceRecord {
   id: string;
-  /** "cycle" = four-week cycle; "monthly" = previous model, read-only history. */
-  kind: "cycle" | "monthly";
+  /**
+   * "month" = calendar-month invoice (current model); "cycle" = four-week cycle
+   * and "legacy_monthly" = first monthly model — both read-only history.
+   */
+  kind: "month" | "cycle" | "legacy_monthly";
   accountId: string;
   studentId: string;
   courseId: string;
   courseTitle: string;
   studentName: string;
   batchId: string | null;
-  /** Monthly invoices only ("YYYY-MM"); "" for cycle invoices. */
+  mode: BillingMode;
+  /** Billed month ("YYYY-MM") for monthly invoices; "" for cycle invoices. */
   period: string;
   /** Cycle invoices only. */
   cycle: number | null;
-  /** E.g. "Cycle 1 · weeks 1–4" or "November 2026 (monthly)". */
+  /** Invoice date ("YYYY-MM-DD", IST) — monthly invoices of the current model only. */
+  invoiceDate: string | null;
+  /** E.g. "November 2026", "Cycle 1 · weeks 1–4" or "November 2026 (earlier monthly invoice)". */
   label: string;
   lines: InvoiceLine[];
+  /** Learn Together: both learners and the per-learner rate (each line is the session total). */
+  learnerCount: number;
+  learnerNames: string[];
+  perLearnerRateMinor: number | null;
   subtotalMinor: number;
+  /** Deduction for the initial enrolment payment (first class/session); 0 if none. */
   advanceAppliedMinor: number;
   amountDueMinor: number;
   status: InvoiceStatus;
@@ -217,23 +266,27 @@ export function mapInvoice(snapshot: DocumentSnapshot<DocumentData>): InvoiceRec
   const d = snapshot.data();
   if (!d) return null;
   const cycle = Number.isSafeInteger(d.cycle) && d.cycle > 0 ? (d.cycle as number) : null;
-  if (cycle === null && !isPeriod(d.period)) return null;
-  const monthly = cycle === null;
-  // Monthly deadlines are always derived from the period; cycle deadlines are the stored checkpoint.
-  const checkpoint = monthly ? null : toIso(d.dueAt);
-  if (!monthly && !checkpoint) return null;
+  const kind: InvoiceRecord["kind"] | null = d.kind === "month" ? "month" : cycle !== null ? "cycle" : isPeriod(d.period) ? "legacy_monthly" : null;
+  if (!kind) return null;
+  if (kind === "month" && !isPeriod(d.period)) return null;
+  // Current monthly and cycle invoices store their deadline; the first monthly model derives it from the period.
+  const stored = kind === "legacy_monthly" ? null : toIso(d.deadlineAt);
+  if (kind !== "legacy_monthly" && !stored) return null;
+  const invoiceDate = kind === "month" && typeof d.invoiceDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.invoiceDate) ? d.invoiceDate : null;
   return {
     id: snapshot.id,
-    kind: monthly ? "monthly" : "cycle",
+    kind,
     accountId: String(d.accountId ?? ""),
     studentId: String(d.studentId ?? ""),
     courseId: String(d.courseId ?? ""),
     courseTitle: String(d.courseTitle ?? "Course"),
     studentName: String(d.studentName ?? "Student"),
     batchId: str(d.batchId),
-    period: monthly ? d.period : "",
+    mode: oneOf(BILLING_MODES, d.mode, "batch"),
+    period: kind === "cycle" ? "" : d.period,
     cycle,
-    label: monthly ? `${periodLabel(d.period)} (monthly)` : `Cycle ${cycle} · ${cycleWeeksLabel(cycle!)}`,
+    invoiceDate,
+    label: kind === "month" ? periodLabel(d.period) : kind === "cycle" ? `Cycle ${cycle} · ${cycleWeeksLabel(cycle!)}` : `${periodLabel(d.period)} (earlier monthly invoice)`,
     lines: Array.isArray(d.lines)
       ? d.lines.map((l: Record<string, unknown>) => ({
           classId: String(l.classId ?? ""),
@@ -242,16 +295,21 @@ export function mapInvoice(snapshot: DocumentSnapshot<DocumentData>): InvoiceRec
           outcome: oneOf(CLASS_OUTCOMES, l.outcome, "attended"),
           rateMinor: int(l.rateMinor),
           rateVersionId: String(l.rateVersionId ?? ""),
-          period: isPeriod(l.period) ? l.period : monthly ? d.period : "",
+          period: isPeriod(l.period) ? l.period : kind === "legacy_monthly" ? d.period : "",
+          ...(l.coveredByInitialPayment === true ? { coveredByInitialPayment: true } : {}),
         }))
       : [],
+    learnerCount: d.learnerCount === 2 ? 2 : 1,
+    learnerNames: Array.isArray(d.learnerNames) && d.learnerNames.length ? d.learnerNames.map(String) : [String(d.studentName ?? "Student")],
+    perLearnerRateMinor: typeof d.perLearnerRateMinor === "number" && d.perLearnerRateMinor > 0 ? d.perLearnerRateMinor : null,
     subtotalMinor: int(d.subtotalMinor),
     advanceAppliedMinor: int(d.advanceAppliedMinor),
     amountDueMinor: int(d.amountDueMinor),
     status: oneOf(INVOICE_STATUSES, d.status, "issued"),
     issuedAt: toIso(d.issuedAt),
-    dueAt: monthly ? invoiceDueAt(d.period) : checkpoint!,
-    deadlineAt: monthly ? paymentDeadline(d.period) : checkpoint!,
+    // Monthly and cycle invoices: payable until the deadline, overdue after it (dueAt = deadlineAt).
+    dueAt: kind === "legacy_monthly" ? invoiceDueAt(d.period) : stored!,
+    deadlineAt: kind === "legacy_monthly" ? paymentDeadline(d.period) : stored!,
     currency: str(d.currency) ?? "INR",
   };
 }
@@ -294,7 +352,7 @@ export interface BillableClassRecord {
   period: string;
   invoiceId: string | null;
   startAt: string;
-  /** "advance": the first class, paid by the first-class payment — never invoiced. */
+  /** "advance": the first class/session, paid by the initial enrolment payment — listed on its monthly invoice with that payment deducted. */
   coveredBy: "advance" | null;
 }
 
@@ -413,24 +471,35 @@ export type ChargePlan =
       previousFirstId: string | null;
     };
 
-/** Reads everything needed to charge one student's batch class. */
+/**
+ * Reads everything needed to charge one student's class (batch) or session
+ * (individual) for a recorded outcome or a cancellation. `nowIso` is the server
+ * time of the outcome/cancellation (the 24-hour rule for individual sessions).
+ */
 export async function prepareClassCharge(tx: Transaction, cls: LiveClassRecord, outcome: ClassOutcome, nowIso: string): Promise<ChargePlan> {
   if (!cls.billingAccountId) return { kind: "none" };
   if (cls.packageId) throw new AccessError("This class uses a prepaid package; it cannot also be billed per class.");
   const ledgerRef = col("billableClasses").doc(cls.id);
   const accountRef = col("billingAccounts").doc(cls.billingAccountId);
-  const [ledgerSnap, accountSnap, configSnap] = await Promise.all([tx.get(ledgerRef), tx.get(accountRef), tx.get(classBillingConfigRef())]);
+  const sessionChargeRef = col("sessionCharges").doc(sessionChargeId(cls.id));
+  const [ledgerSnap, accountSnap, configSnap, sessionChargeSnap] = await Promise.all([
+    tx.get(ledgerRef),
+    tx.get(accountRef),
+    tx.get(classBillingConfigRef()),
+    tx.get(sessionChargeRef),
+  ]);
   const account = mapAccount(accountSnap);
   if (!account) throw new AccessError("The billing account for this class could not be found.");
   if (account.studentId !== cls.studentId) throw new AccessError("This class does not belong to that billing account.");
-  // Individual sessions are paid per session (sessionCharges), never through this ledger.
-  if (account.mode !== "batch") return { kind: "none" };
+  // A session scheduled under the earlier per-session method keeps its own charge (paid separately): never billed again.
+  if (sessionChargeSnap.exists) return { kind: "none" };
   const period = periodOf(cls.startAt);
   // Classes before November 2026 stay with the old payment method.
   if (!isWebsiteBilledPeriod(period)) return { kind: "none" };
 
   const config = mapConfig(configSnap);
-  const billable = isBatchBillable(outcome, config.policy);
+  const cancelledLate = Date.parse(cls.startAt) - Date.parse(nowIso) < FREE_CANCELLATION_HOURS * 3_600_000;
+  const billable = account.mode === "batch" ? isBatchBillable(outcome, config.policy) : isIndividualBillable(outcome, cancelledLate);
   if (ledgerSnap.exists) {
     if (billable) return { kind: "already" };
     const billed = mapBillableClass(ledgerSnap);
@@ -440,11 +509,16 @@ export async function prepareClassCharge(tx: Transaction, cls: LiveClassRecord, 
   }
   if (!billable) return { kind: "none" };
   const version = rateVersionForPeriod(config.rateVersions, period);
+  // The student's agreed rate for the month the class took place (immutable history on the account);
+  // accounts opened before course pricing use the versioned rates. Never the course's latest price.
+  const agreed = agreedRateForPeriod(account.agreedRates, period);
+  // The initial enrolment payment covers the first eligible class/session — only once it has been received.
+  const prepaid = account.advance.status === "verified" || account.advance.status === "applied";
   // The earliest eligible class is the first class. A class recorded late that
-  // took place earlier takes over — but only while no cycle invoice exists.
-  let coversFirst = account.firstClassId === null;
+  // took place earlier takes over — but only while neither has been invoiced.
+  let coversFirst = account.firstClassId === null && (account.mode === "batch" || prepaid);
   let previousFirstId: string | null = null;
-  if (!coversFirst && account.cyclesIssued === 0 && account.firstClassStartAt && cls.startAt < account.firstClassStartAt && account.firstClassId) {
+  if (!coversFirst && account.firstClassStartAt && cls.startAt < account.firstClassStartAt && account.firstClassId && account.advance.status !== "applied") {
     const previous = mapBillableClass(await tx.get(col("billableClasses").doc(account.firstClassId)));
     if (previous && previous.invoiceId === null) {
       coversFirst = true;
@@ -458,7 +532,15 @@ export async function prepareClassCharge(tx: Transaction, cls: LiveClassRecord, 
     nowIso,
     coversFirst,
     previousFirstId,
-    line: { classId: cls.id, date: cls.date, title: cls.title, outcome, rateMinor: version.batchMinor, rateVersionId: version.id, period },
+    line: {
+      classId: cls.id,
+      date: cls.date,
+      title: cls.title,
+      outcome,
+      rateMinor: agreed ?? (account.mode === "batch" ? version.batchMinor : version.individualMinor),
+      rateVersionId: agreed !== null ? "agreed" : version.id,
+      period,
+    },
   };
 }
 
@@ -486,44 +568,22 @@ export function applyClassCharge(tx: Transaction, plan: ChargePlan, actor: Actor
       ? {
           firstClassId: cls.id,
           firstClassStartAt: Timestamp.fromMillis(Date.parse(cls.startAt)),
-          cycleAnchor: istDateOf(cls.startAt),
-          history: FieldValue.arrayUnion(entry(actor, `First class (${cls.date}) paid by the first-class payment; week 1 starts ${istDateOf(cls.startAt)}`)),
+          history: FieldValue.arrayUnion(entry(actor, `First ${account.mode === "batch" ? "class" : "session"} (${cls.date}) paid by the initial enrolment payment`)),
         }
       : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
 }
 
-// --- Individual session charges ---------------------------------------------------------------------------
+// --- Per-session charges (earlier individual method; history, still payable) ---------------------------------
+//
+// New individual sessions are billed on the monthly invoice from their recorded
+// outcome (prepareClassCharge). Sessions that already have a per-session charge
+// keep it: cancellation and rescheduling follow the same 24-hour rule.
 
-/** Writes the charge for a newly scheduled individual session (call after reads). */
-export function writeSessionCharge(
-  tx: Transaction,
-  input: { classId: string; account: BillingAccountRecord; title: string; date: string; startTime: string; startAt: Date; version: RateVersion; actor: Actor },
-) {
-  tx.create(col("sessionCharges").doc(sessionChargeId(input.classId)), {
-    classId: input.classId,
-    accountId: input.account.id,
-    studentId: input.account.studentId,
-    learnerIds: [input.account.studentId],
-    courseId: input.account.courseId,
-    courseTitle: input.account.courseTitle,
-    title: input.title,
-    date: input.date,
-    startTime: input.startTime,
-    startAt: Timestamp.fromDate(input.startAt),
-    amountMinor: input.version.individualMinor,
-    rateVersionId: input.version.id,
-    status: "due",
-    paymentId: null,
-    cancelKind: null,
-    needsReview: null,
-    createdAt: FieldValue.serverTimestamp(),
-    history: [entry(input.actor, `Session charge created (${input.date} ${input.startTime} IST)`)],
-  });
-}
-
-export type SessionCancelPlan = { kind: "none" } | { kind: "update"; ref: DocumentReference; charge: SessionChargeRecord; decision: "no_charge" | "payable"; cancelKind: string };
+export type SessionCancelPlan =
+  | { kind: "none" }
+  | { kind: "update"; ref: DocumentReference; charge: SessionChargeRecord; decision: "no_charge" | "payable"; cancelKind: string };
 
 /** Reads the charge of an individual session being cancelled and decides the outcome on the server. */
 export async function prepareSessionCancel(tx: Transaction, cls: LiveClassRecord, kind: "academy" | "student" | "rescheduled", nowMs: number): Promise<SessionCancelPlan> {
@@ -541,7 +601,7 @@ export function applySessionCancel(tx: Transaction, plan: SessionCancelPlan, act
   if (decision === "payable") {
     tx.update(plan.ref, {
       cancelKind: plan.cancelKind,
-      history: FieldValue.arrayUnion(entry(actor, "Cancelled by the student less than 24 hours before the start — the session fee remains payable")),
+      history: FieldValue.arrayUnion(entry(actor, "Cancelled by the student — the session fee remains payable (recording provided)")),
     });
     return;
   }
@@ -560,94 +620,128 @@ export async function readSessionCharge(tx: Transaction, classId: string) {
   return { ref, charge: mapSessionCharge(await tx.get(ref)) };
 }
 
-// --- Cycle invoices ---------------------------------------------------------------------------------------
+// --- Monthly invoices ------------------------------------------------------------------------------------
 
-export interface CycleIssueResult {
+export interface MonthlyIssueResult {
+  /** Invoice ids created by this call. */
   created: string[];
-  /** Cycles whose checkpoint passed without any new eligible class (nothing to invoice). */
-  empty: number[];
+  /** The month that was closable at this time (null before the first billing month). */
+  period: string | null;
 }
 
-const MAX_CYCLES_PER_RUN = 60;
-
 /**
- * Issues every cycle invoice that is due for one batch account: cycle k is
- * ready once a class in its final week has been recorded, or its checkpoint
- * has passed. Each invoice lists only charges that actually occurred and are
- * not invoiced yet (never the prepaid first class). Idempotent and safe to
- * run concurrently: invoice ids are deterministic and created once, and
- * cyclesIssued only moves forward inside the same transaction.
+ * Issues the monthly invoice of one account (batch or individual) for the
+ * latest month that may be closed now (from 23:00 IST on its last calendar
+ * day). It lists every billable class/session not yet invoiced up to that month,
+ * including the first class/session with the initial enrolment payment deducted.
+ * Idempotent and safe to run concurrently: the invoice id is deterministic and
+ * created once; the charges and the advance are marked in the same transaction.
  */
-export async function issueDueCycleInvoices(accountId: string, actor: Actor, nowIso = new Date().toISOString()): Promise<CycleIssueResult> {
+export async function issueDueMonthlyInvoices(accountId: string, actor: Actor, nowIso = new Date().toISOString()): Promise<MonthlyIssueResult> {
   const accountRef = col("billingAccounts").doc(accountId);
   const nowMs = Date.parse(nowIso);
+  const period = closablePeriod(nowMs);
+  if (!isWebsiteBilledPeriod(period)) return { created: [], period: null };
+  const invoiceRef = col("invoices").doc(monthlyInvoiceId(accountId, period));
   return db().runTransaction(async (tx) => {
     // ---- reads ----
-    const [accountSnap, ledgerSnap] = await Promise.all([tx.get(accountRef), tx.get(col("billableClasses").where("accountId", "==", accountId))]);
+    const [accountSnap, ledgerSnap, invoiceSnap] = await Promise.all([
+      tx.get(accountRef),
+      tx.get(col("billableClasses").where("accountId", "==", accountId)),
+      tx.get(invoiceRef),
+    ]);
     const account = mapAccount(accountSnap);
-    const result: CycleIssueResult = { created: [], empty: [] };
-    if (!account || account.mode !== "batch" || !account.cycleAnchor) return result;
-    const anchor = account.cycleAnchor;
-    const charges = ledgerSnap.docs.map(mapBillableClass).filter((b): b is BillableClassRecord => b !== null && isWebsiteBilledPeriod(b.period));
-    const ready: number[] = [];
-    for (let k = account.cyclesIssued + 1; ready.length < MAX_CYCLES_PER_RUN; k++) {
-      if (!cycleReady({ anchorDate: anchor, cycle: k, nowMs, charges })) break;
-      ready.push(k);
-    }
-    if (ready.length === 0) return result;
-    const invoiceRefs = ready.map((k) => col("invoices").doc(cycleInvoiceId(accountId, k)));
-    const existing = await tx.getAll(...invoiceRefs);
+    const result: MonthlyIssueResult = { created: [], period };
+    // Already issued: classes recorded since then wait for next month's invoice.
+    if (!account || invoiceSnap.exists) return result;
+    // The first class/session is listed (and the initial payment deducted) only once that payment has been
+    // verified; while it is still awaited the class waits for a later invoice — it is never charged twice.
+    const charges = ledgerSnap.docs
+      .map(mapBillableClass)
+      .filter((b): b is BillableClassRecord => b !== null && isWebsiteBilledPeriod(b.period) && (b.coveredBy !== "advance" || account?.advance.status === "verified"));
+    const lines = monthLines(charges, period);
+    if (lines.length === 0) return result;
+    const { subtotalMinor, initialPaymentMinor, amountDueMinor } = monthAmounts(lines);
+    const deduct = initialPaymentMinor > 0;
+    const invoiceDate = monthlyInvoiceDate(period, nowIso);
+    const deadline = monthlyPaymentDeadline(invoiceDate);
+    const invoiceLines: InvoiceLine[] = lines.map((b) => ({
+      classId: b.classId,
+      date: b.date,
+      title: b.title,
+      outcome: b.outcome,
+      rateMinor: b.rateMinor,
+      rateVersionId: b.rateVersionId,
+      period: b.period,
+      ...(b.coveredBy === "advance" && deduct ? { coveredByInitialPayment: true } : {}),
+    }));
+    const rates = new Set(invoiceLines.map((l) => l.rateMinor));
     const now = Timestamp.fromMillis(nowMs);
 
     // ---- writes ----
-    const taken = new Set<string>();
-    ready.forEach((k, i) => {
-      if (existing[i].exists) return; // already issued (safety net; cyclesIssued is the primary guard)
-      const lines = cycleLines(
-        charges.filter((c) => !taken.has(c.classId)),
-        anchor,
-        k,
-      );
-      if (lines.length === 0) {
-        result.empty.push(k);
-        return;
-      }
-      lines.forEach((l) => taken.add(l.classId));
-      const invoiceLines: InvoiceLine[] = lines.map((b) => ({ classId: b.classId, date: b.date, title: b.title, outcome: b.outcome, rateMinor: b.rateMinor, rateVersionId: b.rateVersionId, period: b.period }));
-      const subtotalMinor = invoiceLines.reduce((t, l) => t + l.rateMinor, 0);
-      const rates = new Set(invoiceLines.map((l) => l.rateMinor));
-      const checkpoint = cycleCheckpoint(anchor, k);
-      tx.create(invoiceRefs[i], {
-        kind: "cycle",
-        cycle: k,
-        cycleStart: Timestamp.fromMillis(cycleStartMs(anchor, k)),
+    tx.create(invoiceRef, {
+      kind: "month",
+      period,
+      invoiceDate,
+      accountId,
+      studentId: account.studentId,
+      learnerIds: [account.studentId],
+      courseId: account.courseId,
+      courseTitle: account.courseTitle,
+      studentName: account.studentName,
+      batchId: account.batchId,
+      mode: account.mode,
+      // Learn Together: one invoice for the shared enrolment, both names, per-learner and per-session rates.
+      learnerCount: account.learnerCount,
+      learnerNames: account.learnerNames,
+      perLearnerRateMinor: account.perLearnerRateMinor,
+      lines: invoiceLines,
+      lineCount: invoiceLines.length,
+      rateMinor: rates.size === 1 ? invoiceLines[0].rateMinor : null,
+      subtotalMinor,
+      advanceAppliedMinor: initialPaymentMinor,
+      amountDueMinor,
+      currency: "INR",
+      status: "issued",
+      issuedAt: now,
+      dueAt: Timestamp.fromMillis(Date.parse(deadline)),
+      deadlineAt: Timestamp.fromMillis(Date.parse(deadline)),
+      createdAt: now,
+      createdBy: actor.uid,
+      history: [
+        entry(
+          actor,
+          `${periodLabel(period)} invoice dated ${invoiceDate}: ${invoiceLines.length} ${account.mode === "batch" ? "class(es)" : "session(s)"}${
+            initialPaymentMinor ? `, initial enrolment payment deducted ₹${initialPaymentMinor / 100}` : ""
+          }; payment deadline ${deadline}`,
+        ),
+      ],
+    });
+    for (const l of lines) tx.update(col("billableClasses").doc(l.classId), { invoiceId: invoiceRef.id });
+    tx.update(accountRef, {
+      ...(deduct
+        ? {
+            "advance.status": "applied",
+            "advance.appliedMinor": initialPaymentMinor,
+            history: FieldValue.arrayUnion(entry(actor, `Initial enrolment payment deducted on the ${periodLabel(period)} invoice`)),
+          }
+        : {}),
+      lastInvoicedPeriod: period,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    if (deduct) {
+      tx.create(col("advanceLedger").doc(), {
         accountId,
         studentId: account.studentId,
-        learnerIds: [account.studentId],
-        courseId: account.courseId,
-        courseTitle: account.courseTitle,
-        studentName: account.studentName,
-        batchId: account.batchId,
-        mode: "batch",
-        lines: invoiceLines,
-        lineCount: invoiceLines.length,
-        rateMinor: rates.size === 1 ? invoiceLines[0].rateMinor : null,
-        subtotalMinor,
-        advanceAppliedMinor: 0,
-        amountDueMinor: subtotalMinor,
-        currency: "INR",
-        status: "issued",
-        issuedAt: now,
-        dueAt: Timestamp.fromMillis(Date.parse(checkpoint)),
-        deadlineAt: Timestamp.fromMillis(Date.parse(checkpoint)),
-        createdAt: now,
-        createdBy: actor.uid,
-        history: [entry(actor, `Cycle ${k} invoice (${cycleWeeksLabel(k)}): ${invoiceLines.length} class(es), due ${checkpoint}`)],
+        kind: "applied",
+        amountMinor: initialPaymentMinor,
+        invoiceId: invoiceRef.id,
+        paymentId: account.advance.paymentId,
+        at: now,
+        by: actor.uid,
       });
-      for (const l of lines) tx.update(col("billableClasses").doc(l.classId), { invoiceId: invoiceRefs[i].id });
-      result.created.push(invoiceRefs[i].id);
-    });
-    tx.update(accountRef, { cyclesIssued: ready[ready.length - 1], updatedAt: FieldValue.serverTimestamp() });
+    }
+    result.created.push(invoiceRef.id);
     return result;
   });
 }
@@ -683,13 +777,13 @@ export async function evaluateSuspension(accountId: string, actor: Actor, nowMs 
   return db().runTransaction(async (tx) => {
     const [accountSnap, invoices] = await Promise.all([tx.get(accountRef), readAccountInvoicesInTx(tx, accountId)]);
     const account = mapAccount(accountSnap);
-    if (!account || account.mode !== "batch") return "unchanged";
+    if (!account) return "unchanged";
     const overdue = invoices.filter((i) => i.status === "issued" && i.summary.balanceMinor > 0 && invoiceDueState(i, nowMs) === "overdue");
     const suspend = shouldSuspend(invoices.map((i) => ({ status: i.status, dueAt: i.dueAt, deadlineAt: i.deadlineAt, balanceMinor: i.summary.balanceMinor })), nowMs);
     if (suspend && !account.suspension.active) {
       tx.update(accountRef, {
         suspension: { active: true, since: Timestamp.fromMillis(nowMs), invoiceIds: overdue.map((i) => i.id), liftedAt: null },
-        history: FieldValue.arrayUnion(entry(actor, `Access suspended: ${overdue.map((i) => i.label).join(", ")} unpaid after the due date`)),
+        history: FieldValue.arrayUnion(entry(actor, `Access suspended: ${overdue.map((i) => i.label).join(", ")} unpaid after the payment deadline`)),
       });
       return "suspended";
     }
@@ -697,7 +791,7 @@ export async function evaluateSuspension(accountId: string, actor: Actor, nowMs 
       tx.update(accountRef, {
         "suspension.active": false,
         "suspension.liftedAt": Timestamp.fromMillis(nowMs),
-        history: FieldValue.arrayUnion(entry(actor, "Access restored: no invoice remains unpaid past its due date")),
+        history: FieldValue.arrayUnion(entry(actor, "Access restored: no invoice remains unpaid past its payment deadline")),
       });
       return "restored";
     }
@@ -707,28 +801,28 @@ export async function evaluateSuspension(accountId: string, actor: Actor, nowMs 
 
 export interface ScheduledRunSummary {
   invoicesCreated: number;
-  emptyCycles: number;
   suspended: number;
   restored: number;
   errors: number;
 }
 
 /**
- * The scheduled billing job (Vercel Cron → /api/cron/billing, or "Run billing
- * now" by a teacher). Safe to run any number of times: invoices are
- * create-once, suspension is re-evaluated from the current data.
+ * The scheduled billing job (Vercel Cron → /api/cron/billing, daily 23:30 IST,
+ * or "Run billing now" by a teacher). On the last calendar day of a month it
+ * generates that month's invoices; every run re-evaluates suspensions. Safe to
+ * run any number of times: invoices are create-once, suspension is re-derived
+ * from the current data.
  */
 export async function runScheduledBilling(actor: Actor, nowIso = new Date().toISOString()): Promise<ScheduledRunSummary> {
-  const accounts = (await col("billingAccounts").where("mode", "==", "batch").get()).docs.map((d) => d.id);
-  const summary: ScheduledRunSummary = { invoicesCreated: 0, emptyCycles: 0, suspended: 0, restored: 0, errors: 0 };
+  const accounts = (await col("billingAccounts").get()).docs.map((d) => d.id);
+  const summary: ScheduledRunSummary = { invoicesCreated: 0, suspended: 0, restored: 0, errors: 0 };
   for (const accountId of accounts) {
     try {
-      const r = await issueDueCycleInvoices(accountId, actor, nowIso);
+      const r = await issueDueMonthlyInvoices(accountId, actor, nowIso);
       summary.invoicesCreated += r.created.length;
-      summary.emptyCycles += r.empty.length;
     } catch (error) {
       summary.errors += 1;
-      console.error("[billing] cycle invoice generation failed:", accountId, (error as Error)?.message);
+      console.error("[billing] monthly invoice generation failed:", accountId, (error as Error)?.message);
     }
     try {
       const r = await evaluateSuspension(accountId, actor, Date.parse(nowIso));
@@ -742,14 +836,45 @@ export async function runScheduledBilling(actor: Actor, nowIso = new Date().toIS
   return summary;
 }
 
+/**
+ * Deadline-precise enforcement between scheduled runs: if one of the student's
+ * accounts has an invoice unpaid past its payment deadline but is not yet
+ * suspended, suspend it now (same idempotent evaluation as the job). Called
+ * before Meet links or protected course content are served.
+ */
+export async function enforceOverdueForStudent(studentId: string, nowMs = Date.now()): Promise<void> {
+  if (!isValidId(studentId)) return;
+  const [invoicesSnap, accountsSnap] = await Promise.all([
+    col("invoices").where("studentId", "==", studentId).where("status", "==", "issued").get(),
+    col("billingAccounts").where("studentId", "==", studentId).get(),
+  ]);
+  const suspended = new Set(accountsSnap.docs.filter((d) => d.get("suspension.active") === true).map((d) => d.id));
+  const pastDeadline = new Set(
+    invoicesSnap.docs
+      .map(mapInvoice)
+      .filter((i): i is InvoiceRecord => i !== null && Date.parse(i.deadlineAt) < nowMs && !suspended.has(i.accountId))
+      .map((i) => i.accountId),
+  );
+  // evaluateSuspension checks the balance (paid / partly paid) inside its transaction.
+  for (const accountId of pastDeadline) await evaluateSuspension(accountId, { uid: "access-check", email: null }, nowMs);
+}
+
 // --- Payment targets --------------------------------------------------------------------------------------
 
-export type PaymentTarget = { kind: "advance"; accountId: string } | { kind: "invoice"; invoiceId: string } | { kind: "session"; chargeId: string };
+export type PaymentTarget =
+  | { kind: "advance"; accountId: string }
+  | { kind: "invoice"; invoiceId: string }
+  | { kind: "session"; chargeId: string }
+  | { kind: "registration"; registrationId: string };
 
 export interface TargetState {
   target: PaymentTarget;
-  account: BillingAccountRecord;
-  accountRef: DocumentReference;
+  /** Who and what the payment is for (every target). accountId is null for a registration not yet placed. */
+  owner: { studentId: string; courseId: string; accountId: string | null };
+  /** The billing account (null only for a website registration's initial payment). */
+  account: BillingAccountRecord | null;
+  accountRef: DocumentReference | null;
+  registration: { id: string; status: string; mode: string; amountMinor: number; ref: DocumentReference; learnerName: string; special: boolean } | null;
   invoice: InvoiceRecord | null;
   summary: InvoiceSummary | null;
   session: SessionChargeRecord | null;
@@ -760,12 +885,32 @@ export interface TargetState {
 
 /** Reads a payment target (reads only). */
 export async function readPaymentTarget(tx: Transaction, target: PaymentTarget): Promise<TargetState> {
-  const base = { invoice: null, summary: null, session: null, sessionRef: null };
+  const base = { invoice: null, summary: null, session: null, sessionRef: null, registration: null };
+  const ownerOf = (a: BillingAccountRecord) => ({ studentId: a.studentId, courseId: a.courseId, accountId: a.id });
+  if (target.kind === "registration") {
+    const ref = col("registrations").doc(target.registrationId);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new AccessError("That registration could not be found.");
+    const status = String(snap.get("status") ?? "");
+    const mode = String(snap.get("mode") ?? "");
+    const amountMinor = int(snap.get("initialAmountMinor"));
+    const special = snap.get("kind") === "special";
+    return {
+      ...base,
+      target,
+      owner: { studentId: String(snap.get("studentId") ?? ""), courseId: String(snap.get("courseId") ?? ""), accountId: str(snap.get("accountId")) },
+      account: null,
+      accountRef: null,
+      registration: { id: ref.id, status, mode, amountMinor, ref, learnerName: String(snap.get("details.fullName") ?? "") || "Student", special },
+      payableMinor: payableAmount({ kind: "registration", status, amountMinor }),
+      titleSuffix: `${special ? "programme fee (full payment)" : mode === "individual" ? "first individual session" : "first-class payment"} — ${String(snap.get("courseTitle") ?? "course")} registration`,
+    };
+  }
   if (target.kind === "advance") {
     const accountRef = col("billingAccounts").doc(target.accountId);
     const account = mapAccount(await tx.get(accountRef));
     if (!account) throw new AccessError("That billing account could not be found.");
-    return { ...base, target, account, accountRef, payableMinor: payableAmount({ kind: "advance", advance: account.advance }), titleSuffix: "first-class payment" };
+    return { ...base, target, owner: ownerOf(account), account, accountRef, payableMinor: payableAmount({ kind: "advance", advance: account.advance }), titleSuffix: "first-class payment" };
   }
   if (target.kind === "session") {
     const sessionRef = col("sessionCharges").doc(target.chargeId);
@@ -777,6 +922,7 @@ export async function readPaymentTarget(tx: Transaction, target: PaymentTarget):
     return {
       ...base,
       target,
+      owner: ownerOf(account),
       account,
       accountRef,
       session,
@@ -803,6 +949,7 @@ export async function readPaymentTarget(tx: Transaction, target: PaymentTarget):
   return {
     ...base,
     target,
+    owner: ownerOf(account),
     account,
     accountRef,
     invoice,
@@ -812,8 +959,56 @@ export async function readPaymentTarget(tx: Transaction, target: PaymentTarget):
   };
 }
 
+/**
+ * Active enrolment for a confirmed Special Programme registration (writes only; merge keeps
+ * any earlier enrolment history). Idempotent: repeating it changes nothing that matters.
+ */
+export function grantProgrammeAccess(tx: Transaction, input: { courseId: string; studentId: string; registrationId: string; by: string }) {
+  if (!input.courseId || !input.studentId) return;
+  const ref = col("enrollments").doc(enrollmentId(input.courseId, input.studentId));
+  tx.set(
+    ref,
+    {
+      id: ref.id,
+      studentId: input.studentId,
+      courseId: input.courseId,
+      status: "active",
+      enrolledAt: FieldValue.serverTimestamp(),
+      enrolledBy: input.by,
+      revokedAt: null,
+      revokedBy: null,
+      agreedFee: null,
+      currency: "INR",
+      registrationId: input.registrationId,
+      source: "programme",
+      history: FieldValue.arrayUnion({ type: "enrolled", at: Timestamp.now(), by: input.by }),
+    },
+    { merge: true },
+  );
+}
+
 /** Effects of a payment becoming paid + verified (writes only). Each target changes at most once. */
 export function applyVerifiedPayment(tx: Transaction, state: TargetState, paymentId: string, actor: Actor) {
+  if (state.target.kind === "registration") {
+    // The registration becomes paid; the batch/individual account is created when the academy places the student.
+    if (!state.registration || state.registration.status !== "pending_payment") throw new AccessError("This registration has already been paid.");
+    tx.update(state.registration.ref, {
+      status: "paid",
+      paymentId,
+      paidAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      history: FieldValue.arrayUnion(
+        entry(actor, state.registration.special ? "Full programme fee received (verified) — registration confirmed" : "Initial payment received (verified)"),
+      ),
+    });
+    // Special Programme: the verified full payment grants access at once (no billing account,
+    // no monthly invoice). A guest registration gets it when its account is linked.
+    if (state.registration.special && state.owner.studentId) {
+      grantProgrammeAccess(tx, { courseId: state.owner.courseId, studentId: state.owner.studentId, registrationId: state.registration.id, by: actor.uid });
+    }
+    return;
+  }
+  if (!state.account || !state.accountRef) throw new AccessError("The billing account for this payment could not be found.");
   if (state.target.kind === "advance") {
     if (state.account.advance.status !== "awaiting") throw new AccessError("The advance for this account has already been received.");
     tx.update(state.accountRef, {
@@ -868,6 +1063,8 @@ async function invoiceViews(invoices: InvoiceRecord[], nowMs: number): Promise<I
 }
 
 export interface AccountRow extends BillingAccountRecord {
+  /** The student's agreed rate this month (per class / per session); null for accounts without one (versioned rates). */
+  agreedRateMinor: number | null;
   outstandingMinor: number;
   uninvoicedCount: number;
   uninvoicedMinor: number;
@@ -877,11 +1074,14 @@ export interface AccountRow extends BillingAccountRecord {
 export async function listBillingAccounts(user: SessionUser) {
   assertTeacher(user);
   const nowMs = Date.now();
-  const [accountsSnap, invoicesSnap, ledgerSnap, sessionsSnap] = await Promise.all([
+  const [accountsSnap, invoicesSnap, ledgerSnap, sessionsSnap, reviewSnap, failedSnap] = await Promise.all([
     col("billingAccounts").get(),
     col("invoices").get(),
     col("billableClasses").where("invoiceId", "==", null).get(),
     col("sessionCharges").where("status", "==", "due").get(),
+    // Online payments received but not applied automatically (e.g. stale or short amounts): a teacher decides.
+    col("payments").where("needsReview", "==", true).get(),
+    col("payments").where("status", "==", "failed").get(),
   ]);
   const accounts = accountsSnap.docs.map(mapAccount).filter((a): a is BillingAccountRecord => a !== null);
   const invoices = await invoiceViews(invoicesSnap.docs.map(mapInvoice).filter((i): i is InvoiceRecord => i !== null), nowMs);
@@ -889,8 +1089,10 @@ export async function listBillingAccounts(user: SessionUser) {
   const sessions = sessionsSnap.docs.map(mapSessionCharge).filter((s): s is SessionChargeRecord => s !== null);
   const rows: AccountRow[] = accounts.map((a) => {
     const own = ledger.filter((b) => b.accountId === a.id && b.coveredBy === null);
+    // (The first class/session — coveredBy "advance" — is deducted on its invoice and adds nothing.)
     return {
       ...a,
+      agreedRateMinor: agreedRateForPeriod(a.agreedRates, periodOf(new Date(nowMs).toISOString())),
       outstandingMinor: invoices.filter((i) => i.accountId === a.id && i.status === "issued").reduce((s, i) => s + Math.max(i.summary.balanceMinor, 0), 0),
       uninvoicedCount: own.length,
       uninvoicedMinor: own.reduce((s, b) => s + b.rateMinor, 0),
@@ -901,6 +1103,10 @@ export async function listBillingAccounts(user: SessionUser) {
     rows: rows.sort((a, b) => a.studentName.localeCompare(b.studentName)),
     unpaid: invoices.filter((i) => i.status === "issued" && i.summary.balanceMinor > 0).sort((a, b) => a.dueAt.localeCompare(b.dueAt)),
     suspended: rows.filter((r) => r.suspension.active),
+    paymentsToReview: [...reviewSnap.docs, ...failedSnap.docs]
+      .map(mapPayment)
+      .filter((p): p is PaymentRecord => p !== null && p.purpose !== null)
+      .sort((a, b) => (b.paidAt ?? "").localeCompare(a.paidAt ?? "")),
     sessionsDue: sessions.sort((a, b) => (a.startAt ?? "").localeCompare(b.startAt ?? "")),
     sessionsNeedingReview: (await col("sessionCharges").where("status", "==", "no_charge").get()).docs
       .map(mapSessionCharge)
@@ -944,7 +1150,7 @@ export async function getBillingAccountDetail(user: SessionUser, accountId: stri
 }
 
 export interface AccountBillingStatus {
-  /** "paid" = nothing outstanding; "pending" = invoice not yet due; "overdue" = past its due date; "suspended" = access paused. */
+  /** "paid" = nothing outstanding; "pending" = within the payment window; "overdue" = past its deadline; "suspended" = access paused. */
   state: "paid" | "pending" | "overdue" | "suspended" | "first_class_unpaid";
   outstandingMinor: number;
   openInvoices: { id: string; label: string; balanceMinor: number; dueAt: string; dueState: DueState; classCount: number }[];
@@ -952,7 +1158,7 @@ export interface AccountBillingStatus {
   eligibleForNextClass: boolean;
 }
 
-/** Teacher roster view: each batch account's billing status and next-class eligibility. */
+/** Teacher roster view: each account's billing status and next-class eligibility. */
 export async function getAccountsBillingStatus(user: SessionUser, accounts: readonly BillingAccountRecord[]): Promise<Record<string, AccountBillingStatus>> {
   assertTeacher(user);
   const ids = accounts.map((a) => a.id);
@@ -966,7 +1172,7 @@ export async function getAccountsBillingStatus(user: SessionUser, accounts: read
   return Object.fromEntries(
     accounts.map((a) => {
       const open = invoices.filter((i) => i.accountId === a.id && i.status === "issued" && i.summary.balanceMinor > 0).sort((x, y) => x.dueAt.localeCompare(y.dueAt));
-      const block = batchClassBlock(a);
+      const block = classAccessBlock(a);
       const state: AccountBillingStatus["state"] =
         block === "suspended" ? "suspended" : block === "first_class_unpaid" ? "first_class_unpaid" : open.some((i) => i.dueState === "overdue") ? "overdue" : open.length ? "pending" : "paid";
       return [
@@ -984,7 +1190,7 @@ export async function getAccountsBillingStatus(user: SessionUser, accounts: read
 
 /** The signed-in student's own billing (bound to user.uid). */
 export async function getOwnClassBilling(user: SessionUser) {
-  const empty = { accounts: [], invoices: [], sessions: [], uninvoiced: [] as { courseTitle: string; count: number; amountMinor: number }[] };
+  const empty = { accounts: [], invoices: [], sessions: [], uninvoiced: [] as { courseTitle: string; mode: BillingMode; count: number; amountMinor: number }[] };
   if (user.role !== "student") return empty;
   const nowMs = Date.now();
   const [accountsSnap, invoicesSnap, sessionsSnap, ledgerSnap] = await Promise.all([
@@ -995,16 +1201,23 @@ export async function getOwnClassBilling(user: SessionUser) {
   ]);
   const accounts = accountsSnap.docs.map(mapAccount).filter((a): a is BillingAccountRecord => a !== null && a.studentId === user.uid);
   const invoices = await invoiceViews(invoicesSnap.docs.map(mapInvoice).filter((i): i is InvoiceRecord => i !== null && i.studentId === user.uid && i.status === "issued"), nowMs);
-  const pending = ledgerSnap.docs.map(mapBillableClass).filter((b): b is BillableClassRecord => b !== null && b.studentId === user.uid && b.invoiceId === null && b.coveredBy === null);
+  // The first class/session is listed with the initial payment deducted, so it is shown at no cost here.
+  const pending = ledgerSnap.docs
+    .map(mapBillableClass)
+    .filter((b): b is BillableClassRecord => b !== null && b.studentId === user.uid && b.invoiceId === null)
+    .map((b) => (b.coveredBy === "advance" ? { ...b, rateMinor: 0 } : b));
   return {
     accounts: accounts.map((a) => ({
       id: a.id,
       courseTitle: a.courseTitle,
       mode: a.mode,
+      learnerNames: a.learnerNames,
+      learnerCount: a.learnerCount,
+      perLearnerRateMinor: a.perLearnerRateMinor,
       status: a.status,
       suspended: a.suspension.active,
       advance: { status: a.advance.status, amountMinor: a.advance.amountMinor },
-      blocked: batchClassBlock(a),
+      blocked: classAccessBlock(a),
     })),
     invoices: invoices
       .sort((a, b) => b.dueAt.localeCompare(a.dueAt))
@@ -1013,6 +1226,11 @@ export async function getOwnClassBilling(user: SessionUser) {
         courseTitle: i.courseTitle,
         label: i.label,
         kind: i.kind,
+        period: i.period,
+        invoiceDate: i.invoiceDate,
+        learnerCount: i.learnerCount,
+        learnerNames: i.learnerNames,
+        perLearnerRateMinor: i.perLearnerRateMinor,
         lines: i.lines,
         subtotalMinor: i.subtotalMinor,
         advanceAppliedMinor: i.advanceAppliedMinor,
@@ -1026,11 +1244,11 @@ export async function getOwnClassBilling(user: SessionUser) {
       .filter((s): s is SessionChargeRecord => s !== null && s.studentId === user.uid)
       .sort((a, b) => (b.startAt ?? "").localeCompare(a.startAt ?? ""))
       .map((s) => ({ id: s.id, courseTitle: s.courseTitle, title: s.title, date: s.date, startTime: s.startTime, amountMinor: s.amountMinor, status: s.status, cancelKind: s.cancelKind })),
+    // Billable classes/sessions held and recorded but not on an invoice yet (next monthly invoice).
     uninvoiced: accounts
-      .filter((a) => a.mode === "batch")
       .map((a) => {
         const own = pending.filter((b) => b.accountId === a.id);
-        return { courseTitle: a.courseTitle, count: own.length, amountMinor: own.reduce((s, b) => s + b.rateMinor, 0) };
+        return { courseTitle: a.courseTitle, mode: a.mode, count: own.length, amountMinor: own.reduce((s, b) => s + b.rateMinor, 0) };
       })
       .filter((u) => u.count > 0),
   };
@@ -1044,5 +1262,5 @@ export async function listIndividualAccounts(user: SessionUser) {
   return snap.docs
     .map(mapAccount)
     .filter((a): a is BillingAccountRecord => a !== null && a.status === "active")
-    .map((a) => ({ id: a.id, studentId: a.studentId, label: `${a.courseTitle} — individual session (paid per session)` }));
+    .map((a) => ({ id: a.id, studentId: a.studentId, label: `${a.courseTitle} — individual sessions (monthly invoice)` }));
 }
