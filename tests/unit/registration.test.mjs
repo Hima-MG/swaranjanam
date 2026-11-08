@@ -138,14 +138,27 @@ describe("weekly batch schedules", () => {
 });
 
 describe("learner contact details", () => {
-  test("email is required and lower-cased; mobile needs a country code (E.164)", async () => {
+  test("email is required and lower-cased; mobile is stored as E.164", async () => {
     const { normalizeMobile } = await import("../../src/lib/lms/registration.ts");
     const { value } = parseRegistrationDetails(adult(), TODAY);
     assert.deepEqual([value.email, value.mobile], ["anjali@example.test", "+919847000000"]);
     assert.ok(parseRegistrationDetails(adult({ email: "not-an-email" }), TODAY).errors.email);
-    assert.ok(parseRegistrationDetails(adult({ mobile: "9847000000" }), TODAY).errors.mobile, "no country code");
     assert.equal(normalizeMobile("+44 (20) 7946-0958"), "+442079460958");
     assert.equal(normalizeMobile("+0123456789"), null);
+  });
+  test("mobile: India (+91) is assumed for a 10-digit number and the code is never duplicated", async () => {
+    const { normalizeMobile } = await import("../../src/lib/lms/registration.ts");
+    for (const input of ["9847000000", "98470 00000", "98470-00000", "09847000000", "919847000000", "91 98470 00000", "+919847000000", "+91 98470 00000", "+91-98470-00000", "0091 9847000000"]) {
+      assert.equal(normalizeMobile(input), "+919847000000", input);
+    }
+    assert.equal(parseRegistrationDetails(adult({ mobile: "9847000000" }), TODAY).value.mobile, "+919847000000", "no country selection needed");
+    // Invalid Indian numbers: wrong length, landline-style start, duplicated code.
+    for (const bad of ["984700000", "98470000001", "5847000000", "+915847000000", "+9198470000", "+91919847000000", "abcdefghij", "", "  "]) {
+      assert.equal(normalizeMobile(bad), null, bad);
+    }
+    assert.ok(parseRegistrationDetails(adult({ mobile: "12345" }), TODAY).errors.mobile);
+    // Other countries keep their own code.
+    assert.equal(normalizeMobile("+1 415 555 0100"), "+14155550100");
   });
   test("guest checkout cookie: registration id and token", async () => {
     const { guestCookieName, parseGuestCookie } = await import("../../src/lib/lms/guest-cookie.ts");

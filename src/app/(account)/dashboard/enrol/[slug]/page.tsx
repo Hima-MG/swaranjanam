@@ -20,7 +20,7 @@ import { formatDate } from "@/lib/format-date";
 import { registrationStatusLabel, WEEKDAY_LABELS, WEEKDAYS } from "@/lib/lms/registration";
 import { claimGuestRegistrations } from "@/lib/lms/server/guest-enrolment";
 import { getOwnRegistration } from "@/lib/lms/server/registrations";
-import { onlinePaymentsEnabled } from "@/lib/payments/razorpay";
+import { onlinePaymentsStatus } from "@/lib/payments/razorpay";
 
 export const metadata: Metadata = { title: "Enrol" };
 
@@ -115,7 +115,8 @@ async function Enrol({ params, searchParams }: { params: Params; searchParams: S
 
   // ---- Step 3: review and pay (also the retry after a failed or cancelled checkout) ----
   if (r.status === "pending_payment") {
-    const payOnline = onlinePaymentsEnabled();
+    const online = onlinePaymentsStatus();
+    const payOnline = online.enabled;
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
         {back}
@@ -138,12 +139,12 @@ async function Enrol({ params, searchParams }: { params: Params; searchParams: S
           </p>
           )}
           {payOnline ? (
-            <PayOnlineButton kind="registration" id={r.id} label={`Pay ${formatMoney(r.initialAmountMinor)}`} />
+            <PayOnlineButton kind="registration" id={r.id} mode={online.mode} statusCheck label={`Pay Now — ${formatMoney(r.initialAmountMinor)}`} />
           ) : (
-            <p className="text-sm text-muted-foreground">Online payment is not available yet. Your registration is saved; the academy will tell you how to pay.</p>
+            <p className="text-sm text-muted-foreground">Online payment is temporarily unavailable. Your registration is saved — please try again later or contact the academy.</p>
           )}
           <p className="text-xs text-muted-foreground">
-            Your payment counts only after the academy&apos;s server has verified it with Razorpay. If a payment fails or you close the checkout, nothing is lost:
+            Your payment counts only after the academy&apos;s server has verified it with Razorpay. If you paid but closed the page before it was confirmed, use “Check payment status” — do not pay again. If a payment fails or you close the checkout, nothing is lost:
             come back to this page and try again.
           </p>
           <Button asChild variant="outline" className="self-start">

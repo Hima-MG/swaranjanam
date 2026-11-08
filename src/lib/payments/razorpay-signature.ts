@@ -24,7 +24,14 @@ export function verifyWebhookSignature(rawBody: string, signature: unknown, webh
   return safeEqualHex(expected, signature);
 }
 
-/** Only Razorpay TEST keys are accepted by this build; live payments are disabled. */
+/** True for a Razorpay Test Mode key id (rzp_test_…). */
 export function isTestKeyId(keyId: string | undefined | null): boolean {
-  return typeof keyId === "string" && /^rzp_test_[A-Za-z0-9]+$/.test(keyId);
+  return razorpayKeyMode(keyId) === "test";
+}
+
+/** "test" for rzp_test_…, "live" for rzp_live_…, null for anything else. */
+export function razorpayKeyMode(keyId: string | undefined | null): "test" | "live" | null {
+  if (typeof keyId !== "string") return null;
+  const m = /^rzp_(test|live)_[A-Za-z0-9]+$/.exec(keyId);
+  return m ? (m[1] as "test" | "live") : null;
 }

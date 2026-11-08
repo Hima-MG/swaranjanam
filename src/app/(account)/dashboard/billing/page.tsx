@@ -16,7 +16,7 @@ import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
 import { ADVANCE_STATUS_LABELS, CLASS_BLOCK_MESSAGES, BILLING_MODE_LABELS, CLASS_OUTCOME_LABELS, SESSION_CHARGE_LABELS } from "@/lib/lms/class-billing";
 import { getOwnClassBilling } from "@/lib/lms/server/class-billing";
-import { onlinePaymentsEnabled } from "@/lib/payments/razorpay";
+import { onlinePaymentsStatus } from "@/lib/payments/razorpay";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
 import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses, listOwnClassHistory } from "@/lib/lms/server/classes";
@@ -35,7 +35,8 @@ async function StudentBilling() {
     listOwnClassHistory(user),
     getOwnClassBilling(user),
   ]);
-  const payOnline = onlinePaymentsEnabled();
+  const online = onlinePaymentsStatus();
+  const payOnline = online.enabled;
   const { packages, payments, receipts } = billing;
   const upcomingOnly = upcoming.classes.filter((c) => Date.parse(c.endAt) >= upcoming.nowMs && c.status === "scheduled");
 
@@ -82,7 +83,7 @@ async function StudentBilling() {
                 )}
                 {a.blocked && <p className="text-xs text-destructive">{CLASS_BLOCK_MESSAGES[a.blocked]}</p>}
                 {a.advance.status === "awaiting" && payOnline && (
-                  <PayOnlineButton kind="advance" id={a.id} label={`Pay ${formatMoney(a.advance.amountMinor)} for your first class`} />
+                  <PayOnlineButton mode={online.mode} kind="advance" id={a.id} label={`Pay ${formatMoney(a.advance.amountMinor)} for your first class`} />
                 )}
                 <p className="text-xs text-muted-foreground">
                   {a.mode === "batch"
@@ -148,7 +149,7 @@ async function StudentBilling() {
                     </p>
                   )}
                   {i.summary.pendingMinor > 0 && <p className="text-xs text-muted-foreground">{formatMoney(i.summary.pendingMinor)} awaiting verification</p>}
-                  {i.summary.balanceMinor > 0 && payOnline && <PayOnlineButton kind="invoice" id={i.id} label={`Pay ${formatMoney(i.summary.balanceMinor)}`} />}
+                  {i.summary.balanceMinor > 0 && payOnline && <PayOnlineButton mode={online.mode} kind="invoice" id={i.id} label={`Pay ${formatMoney(i.summary.balanceMinor)}`} />}
                 </li>
               ))}
             </ul>
@@ -171,7 +172,7 @@ async function StudentBilling() {
                         <Badge variant={s.status === "paid" ? "gold" : s.status === "due" ? "outline" : "secondary"}>{SESSION_CHARGE_LABELS[s.status]}</Badge>
                         <span className="font-semibold text-brown">{s.status === "no_charge" ? "₹0" : formatMoney(s.amountMinor)}</span>
                       </span>
-                      {s.status === "due" && payOnline && <PayOnlineButton kind="session" id={s.id} label={`Pay ${formatMoney(s.amountMinor)}`} />}
+                      {s.status === "due" && payOnline && <PayOnlineButton mode={online.mode} kind="session" id={s.id} label={`Pay ${formatMoney(s.amountMinor)}`} />}
                     </span>
                   </li>
                 ))}

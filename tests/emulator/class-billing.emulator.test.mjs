@@ -762,6 +762,9 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
       }
       const m = u.match(/\/v1\/payments\/(pay_[A-Za-z0-9]+)$/);
       if (m && razorpay.payments.has(m[1])) return Response.json(razorpay.payments.get(m[1]));
+      // Payment attempts of one order (status recovery / double-charge guard).
+      const o = u.match(/\/v1\/orders\/(order_[A-Za-z0-9]+)\/payments$/);
+      if (o) return Response.json({ items: [...razorpay.payments.values()].filter((p) => p.order_id === o[1]) });
       return new Response("{}", { status: 404 });
     };
     for (const [cid, slug] of [[enrolCourse, enrolSlug], [otherCourse, otherSlug]]) {
@@ -893,6 +896,120 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
     assert.equal(fresh.amountMinor, 75_000);
     const result = await processVerifiedGatewayPayment({ orderId: stale.orderId, paymentId: "pay_G7stale", amountMinor: 40_000, currency: "INR", status: "captured", via: "webhook" });
     assert.match(result.needsReview, /less than the amount now due/);
+    assert.equal((await registration(registrationId)).status, "pending_payment");
+  });
+
+  test("browser closed after paying: 'Check payment status' records the captured payment once; no second charge", async () => {
+    const { saveRegistration } = await regs();
+    const gateway = await gw();
+    const { registrationId } = await saveRegistration(student("rg-r1"), { slug: enrolSlug, mode: "batch", details: details() }, NOW);
+    assert.deepEqual(await gateway.recoverStudentPayment(student("rg-r1"), { kind: "registration", registrationId }), { status: "none" }, "nothing to recover yet");
+    const order = await gateway.createOrderForStudent(student("rg-r1"), { kind: "registration", registrationId });
+    // Paid on Razorpay, but neither the checkout confirmation nor the webhook reached the server.
+    razorpay.payments.set("pay_R1ok", { id: "pay_R1ok", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" });
+    await assert.rejects(gateway.recoverStudentPayment(student("intruder"), { kind: "registration", registrationId }), /could not be found/);
+    assert.deepEqual(await gateway.recoverStudentPayment(student("rg-r1"), { kind: "registration", registrationId }), { status: "recorded" });
+    assert.equal((await registration(registrationId)).status, "paid");
+    const pay = (await db.collection("payments").doc("rzp_pay_R1ok").get()).data();
+    assert.deepEqual([pay.gateway.via, pay.gateway.mode, pay.amountMinor, pay.verified], ["recovery", "test", 40_000, true]);
+    assert.deepEqual(await gateway.recoverStudentPayment(student("rg-r1"), { kind: "registration", registrationId }), { status: "already_recorded" });
+    assert.equal((await db.collection("payments").where("registrationId", "==", registrationId).get()).size, 1);
+  });
+
+  test("repeated checkout after a lost confirmation records the earlier payment instead of opening a new order", async () => {
+    const { saveRegistration } = await regs();
+    const gateway = await gw();
+    const { registrationId } = await saveRegistration(student("rg-r2"), { slug: enrolSlug, mode: "individual", details: details() }, NOW);
+    const order = await gateway.createOrderForStudent(student("rg-r2"), { kind: "registration", registrationId });
+    razorpay.payments.set("pay_R2ok", { id: "pay_R2ok", order_id: order.orderId, amount: 75_000, currency: "INR", status: "captured" });
+    const before = razorpay.orders;
+    await assert.rejects(gateway.createOrderForStudent(student("rg-r2"), { kind: "registration", registrationId }), /already been received/);
+    assert.equal(razorpay.orders, before, "no new Razorpay order");
+    assert.equal((await registration(registrationId)).status, "paid");
+    assert.equal((await db.collection("payments").where("registrationId", "==", registrationId).get()).size, 1);
+  });
+
+  test("an authorised-but-not-captured payment blocks a second checkout and reports 'processing'", async () => {
+    const { saveRegistration } = await regs();
+    const gateway = await gw();
+    const { registrationId } = await saveRegistration(student("rg-r3"), { slug: enrolSlug, mode: "batch", details: details() }, NOW);
+    const order = await gateway.createOrderForStudent(student("rg-r3"), { kind: "registration", registrationId });
+    razorpay.payments.set("pay_R3auth", { id: "pay_R3auth", order_id: order.orderId, amount: 40_000, currency: "INR", status: "authorized" });
+    await assert.rejects(gateway.createOrderForStudent(student("rg-r3"), { kind: "registration", registrationId }), /still being processed/);
+    assert.deepEqual(await gateway.recoverStudentPayment(student("rg-r3"), { kind: "registration", registrationId }), { status: "processing" });
+    assert.equal((await registration(registrationId)).status, "pending_payment");
+    // Once Razorpay captures it, recovery records it.
+    razorpay.payments.set("pay_R3auth", { id: "pay_R3auth", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" });
+    assert.deepEqual(await gateway.recoverStudentPayment(student("rg-r3"), { kind: "registration", registrationId }), { status: "recorded" });
+    assert.equal((await registration(registrationId)).status, "paid");
+  });
+
+  test("webhook payment.failed is noted on the order only; duplicates and wrong amounts never record a payment", async () => {
+    const { saveRegistration } = await regs();
+    const gateway = await gw();
+    const { POST } = await import("@/app/api/payments/razorpay/webhook/route");
+    const { registrationId } = await saveRegistration(student("rg-r4"), { slug: enrolSlug, mode: "batch", details: details() }, NOW);
+    const order = await gateway.createOrderForStudent(student("rg-r4"), { kind: "registration", registrationId });
+    const deliver = (event, entity, eventId) => {
+      const body = JSON.stringify({ event, payload: { payment: { entity } } });
+      return POST(
+        new Request("http://localhost/api/payments/razorpay/webhook", {
+          method: "POST",
+          body,
+          headers: { "x-razorpay-signature": createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex"), "x-razorpay-event-id": eventId },
+        }),
+      );
+    };
+    const failed = { id: "pay_R4fail", order_id: order.orderId, amount: 40_000, currency: "INR", status: "failed", error_code: "BAD_REQUEST_ERROR", error_description: "Card declined" };
+    assert.equal((await (await deliver("payment.failed", failed, `evt_R4a${run}`)).json()).outcome, "noted");
+    assert.equal((await (await deliver("payment.failed", failed, `evt_R4a${run}`)).json()).duplicate, true);
+    const o = (await db.collection("gatewayOrders").doc(order.orderId).get()).data();
+    assert.deepEqual([o.status, o.failedAttempts, o.lastFailure.code], ["created", 1, "BAD_REQUEST_ERROR"]);
+    assert.equal((await registration(registrationId)).status, "pending_payment");
+    // Wrong amount (signed, but not what the server's order expects) → refused, Razorpay retries, nothing recorded.
+    const short = { id: "pay_R4short", order_id: order.orderId, amount: 39_900, currency: "INR", status: "captured" };
+    assert.equal((await deliver("payment.captured", short, `evt_R4b${run}`)).status, 500);
+    // Wrong currency, and a payment for an order the server never created.
+    assert.equal((await deliver("payment.captured", { ...short, id: "pay_R4usd", amount: 40_000, currency: "USD" }, `evt_R4c${run}`)).status, 500);
+    assert.equal((await deliver("payment.captured", { ...short, id: "pay_R4x", order_id: "order_NotOurs1", amount: 40_000 }, `evt_R4d${run}`)).status, 500);
+    assert.equal((await db.collection("payments").where("registrationId", "==", registrationId).get()).size, 0);
+    assert.equal((await db.collection("gatewayEvents").doc(`evt_R4b${run}`).get()).exists, false, "retried by Razorpay");
+    // The student can still pay: the same order is reused.
+    assert.equal((await gateway.createOrderForStudent(student("rg-r4"), { kind: "registration", registrationId })).orderId, order.orderId);
+  });
+
+  test("guest registration: status recovery needs the checkout token and records a lost payment once", async () => {
+    const g = await import("@/lib/lms/server/guest-enrolment");
+    const gateway = await gw();
+    const saved = await g.saveGuestRegistration({ slug: enrolSlug, mode: "batch", details: details({ email: `rec-${run}@example.test` }) }, null, NOW);
+    const order = await gateway.createOrderForGuest(saved.registrationId, saved.token);
+    razorpay.payments.set("pay_R5ok", { id: "pay_R5ok", order_id: order.orderId, amount: 40_000, currency: "INR", status: "captured" });
+    await assert.rejects(gateway.recoverGuestPayment(saved.registrationId, "x".repeat(43)), /could not be found/);
+    assert.deepEqual(await gateway.recoverGuestPayment(saved.registrationId, saved.token), { status: "recorded" });
+    assert.equal((await registration(saved.registrationId)).status, "paid");
+    assert.deepEqual(await gateway.recoverGuestPayment(saved.registrationId, saved.token), { status: "already_recorded" });
+    assert.equal((await db.collection("payments").where("registrationId", "==", saved.registrationId).get()).size, 1);
+  });
+
+  test("Live Mode keys are refused on a test (emulator) project: nothing can be ordered or recorded", async () => {
+    const { saveRegistration } = await regs();
+    const gateway = await gw();
+    const razorpayLib = await import("@/lib/payments/razorpay");
+    const { registrationId } = await saveRegistration(student("rg-r6"), { slug: enrolSlug, mode: "batch", details: details() }, NOW);
+    const testOrder = await gateway.createOrderForStudent(student("rg-r6"), { kind: "registration", registrationId });
+    const keep = process.env.RAZORPAY_KEY_ID;
+    process.env.RAZORPAY_KEY_ID = "rzp_live_FakeLiveKey1";
+    try {
+      assert.equal(razorpayLib.onlinePaymentsEnabled(), false);
+      assert.match(razorpayLib.onlinePaymentsStatus().reason, /Live Mode keys cannot be used/);
+      await assert.rejects(gateway.createOrderForStudent(student("rg-r6"), { kind: "registration", registrationId }), razorpayLib.GatewayConfigError);
+      await assert.rejects(
+        processVerifiedGatewayPayment({ orderId: testOrder.orderId, paymentId: "pay_R6live", amountMinor: 40_000, currency: "INR", status: "captured", via: "webhook" }),
+        razorpayLib.GatewayConfigError,
+      );
+    } finally {
+      process.env.RAZORPAY_KEY_ID = keep;
+    }
     assert.equal((await registration(registrationId)).status, "pending_payment");
   });
 

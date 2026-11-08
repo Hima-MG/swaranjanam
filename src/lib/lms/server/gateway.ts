@@ -9,11 +9,21 @@ import { applyVerifiedPayment, evaluateSuspension, readPaymentTarget, type Payme
 import { provisionRegistrationAccount, readGuestRegistration } from "@/lib/lms/server/guest-enrolment";
 import { col, db, toIso } from "@/lib/lms/server/db";
 import type { PaymentRecord } from "@/lib/lms/types";
-import { assertTestPaymentEnvironment, createRazorpayOrder, fetchRazorpayPayment, GatewayConfigError, readRazorpayConfig } from "@/lib/payments/razorpay";
+import {
+  createRazorpayOrder,
+  fetchOrderPayments,
+  fetchRazorpayPayment,
+  GatewayConfigError,
+  MIN_ORDER_MINOR,
+  readRazorpayConfig,
+  requirePaymentMode,
+  type RazorpayConfig,
+} from "@/lib/payments/razorpay";
 import { verifyCheckoutSignature } from "@/lib/payments/razorpay-signature";
 
-// Razorpay (test mode) for class-based billing: the registration advance and
-// monthly batch invoices and individual sessions.
+// Razorpay (Test Mode or Live Mode, from the key id) for class-based billing:
+// the registration's initial payment (first class / full programme fee), the
+// first-class advance, monthly invoices and individual sessions.
 //
 //  * Amounts are calculated on the server from the advance requirement or the
 //    invoice balance — never taken from the browser.
@@ -23,6 +33,9 @@ import { verifyCheckoutSignature } from "@/lib/payments/razorpay-signature";
 //  * Processing is idempotent: payments/rzp_{paymentId} is created once, and
 //    webhook events are recorded once in gatewayEvents/{eventId}.
 //  * Receipts are issued through the existing transaction-guarded workflow.
+//  * Before a new checkout opens, earlier open orders of the same item are
+//    checked with Razorpay, so a payment whose confirmation was lost (browser
+//    closed, webhook late) is recorded instead of charging the student twice.
 
 const targetKey = (t: PaymentTarget) =>
   t.kind === "advance" ? `advance_${t.accountId}` : t.kind === "session" ? `session_${t.chargeId}` : t.kind === "registration" ? `registration_${t.registrationId}` : `invoice_${t.invoiceId}`;
@@ -63,21 +76,30 @@ export async function createOrderForGuest(registrationId: string, token: unknown
   return createOrReuseOrder(config, target, state, { studentId: null, guestRegistrationId: registrationId });
 }
 
+type OrderOwner = { studentId: string | null; guestRegistrationId: string | null };
+
 async function createOrReuseOrder(
-  config: NonNullable<ReturnType<typeof readRazorpayConfig>>,
+  config: RazorpayConfig,
   target: PaymentTarget,
   state: Awaited<ReturnType<typeof readPaymentTarget>>,
-  owner: { studentId: string | null; guestRegistrationId: string | null },
+  owner: OrderOwner,
 ): Promise<CheckoutOrder> {
   if (state.payableMinor === null) throw new AccessError("Nothing is payable on this item right now.");
   const amountMinor = state.payableMinor;
+  if (amountMinor < MIN_ORDER_MINOR) throw new AccessError("This amount is too small to pay online. Please contact the academy.");
   const description = state.titleSuffix;
   const key = targetKey(target);
+
+  // Double-charge guard: settle (or wait for) any payment already made on an earlier order of this item.
+  const earlier = await reconcileOpenOrders(config, key, owner);
+  if (earlier.recorded > 0 || earlier.duplicate > 0) throw new AccessError("Your payment has already been received and verified. Please refresh the page.");
+  if (earlier.pending > 0) throw new AccessError("A payment for this is still being processed by Razorpay. Please check the payment status again in a few minutes before paying again.");
 
   const existing = await col("gatewayOrders").where("targetKey", "==", key).get();
   const reusable = existing.docs.find(
     (d) =>
       d.get("status") === "created" &&
+      (d.get("mode") ?? "test") === config.mode &&
       (d.get("studentId") ?? null) === owner.studentId &&
       (d.get("guestRegistrationId") ?? null) === owner.guestRegistrationId &&
       d.get("amountMinor") === amountMinor &&
@@ -94,7 +116,7 @@ async function createOrReuseOrder(
   await col("gatewayOrders").doc(order.id).create({
     targetKey: key,
     target,
-    mode: "test",
+    mode: config.mode,
     studentId: owner.studentId,
     guestRegistrationId: owner.guestRegistrationId,
     amountMinor,
@@ -112,7 +134,7 @@ export interface VerifiedGatewayPayment {
   amountMinor: number;
   currency: string;
   status: string;
-  via: "checkout" | "webhook";
+  via: "checkout" | "webhook" | "recovery";
 }
 
 export type ProcessResult =
@@ -126,8 +148,8 @@ export type ProcessResult =
  * any number of times for the same payment.
  */
 export async function processVerifiedGatewayPayment(input: VerifiedGatewayPayment): Promise<ProcessResult> {
-  // Fail-closed: a Test Mode payment never touches a production project's billing.
-  assertTestPaymentEnvironment();
+  // Fail-closed: Test Mode payments never touch a production project's billing, and Live Mode only a real project.
+  const mode = requirePaymentMode();
   if (input.status !== "captured") return { outcome: "not_captured", status: input.status };
   const orderRef = col("gatewayOrders").doc(input.orderId);
   const paymentDocId = `rzp_${input.paymentId}`;
@@ -139,7 +161,7 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
     if (paymentSnap.exists) return { outcome: "duplicate" as const, paymentId: paymentDocId };
     if (!orderSnap.exists) throw new Error("Payment for an unknown order");
     const order = orderSnap.data()!;
-    if (order.mode !== undefined && order.mode !== "test") throw new Error("Payment for an order of another payment mode");
+    if ((order.mode ?? "test") !== mode) throw new Error("Payment for an order of another payment mode");
     if (order.amountMinor !== input.amountMinor || input.currency !== "INR") {
       throw new Error("Payment amount does not match the order");
     }
@@ -217,7 +239,7 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
       rejectionReason: null,
       receiptId: receiptNumber ? paymentDocId : null,
       source: "gateway",
-      gateway: { provider: "razorpay", mode: "test", orderId: input.orderId, paymentId: input.paymentId, via: input.via },
+      gateway: { provider: "razorpay", mode, orderId: input.orderId, paymentId: input.paymentId, via: input.via },
       notes: needsReview,
       needsReview: needsReview !== null,
       createdBy: GATEWAY_ACTOR.uid,
@@ -334,7 +356,7 @@ export async function confirmGuestCheckoutPayment(
 }
 
 async function verifyAndRecordCheckout(
-  config: NonNullable<ReturnType<typeof readRazorpayConfig>>,
+  config: RazorpayConfig,
   orderId: string,
   paymentId: string,
   signature: unknown,
@@ -355,4 +377,95 @@ async function verifyAndRecordCheckout(
   if (result.outcome === "not_captured") return { status: "processing", receiptNumber: null };
   if (result.outcome === "duplicate") return { status: "already_recorded", receiptNumber: null };
   return { status: "recorded", receiptNumber: result.receiptNumber };
+}
+
+// --- Recovery: payments whose confirmation never reached the server ------------------------------------------
+
+const RECONCILE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const RECONCILE_MAX_ORDERS = 5;
+
+/**
+ * Asks Razorpay about this owner's recent open orders for one item and records
+ * every CAPTURED payment through the same idempotent processor (amount, currency
+ * and order are re-checked there). "pending" counts payments Razorpay has
+ * authorised but not captured yet.
+ */
+async function reconcileOpenOrders(config: RazorpayConfig, key: string, owner: OrderOwner): Promise<{ recorded: number; duplicate: number; pending: number; paidOrders: number }> {
+  const snap = await col("gatewayOrders").where("targetKey", "==", key).get();
+  const mine = snap.docs.filter(
+    (d) => (d.get("studentId") ?? null) === owner.studentId && (d.get("guestRegistrationId") ?? null) === owner.guestRegistrationId && (d.get("mode") ?? "test") === config.mode,
+  );
+  const open = mine
+    .filter((d) => d.get("status") === "created" && Date.now() - (d.get("createdAt")?.toMillis?.() ?? 0) < RECONCILE_WINDOW_MS)
+    .sort((a, b) => (b.get("createdAt")?.toMillis?.() ?? 0) - (a.get("createdAt")?.toMillis?.() ?? 0))
+    .slice(0, RECONCILE_MAX_ORDERS);
+  const tally = { recorded: 0, duplicate: 0, pending: 0, paidOrders: mine.filter((d) => d.get("status") === "paid").length };
+  for (const order of open) {
+    const payments = await fetchOrderPayments(config, order.id);
+    for (const payment of payments) {
+      if (payment.order_id !== order.id) continue;
+      if (payment.status === "authorized") tally.pending += 1;
+      if (payment.status !== "captured") continue;
+      const result = await processVerifiedGatewayPayment({ orderId: order.id, paymentId: payment.id, amountMinor: payment.amount, currency: payment.currency, status: payment.status, via: "recovery" });
+      if (result.outcome === "recorded") tally.recorded += 1;
+      else if (result.outcome === "duplicate") tally.duplicate += 1;
+    }
+  }
+  return tally;
+}
+
+export interface RecoveredPayment {
+  /** recorded = verified now; already_recorded = verified earlier; processing = Razorpay has not captured it yet; none = no payment found. */
+  status: "recorded" | "already_recorded" | "processing" | "none";
+}
+
+function summarise(t: Awaited<ReturnType<typeof reconcileOpenOrders>>): RecoveredPayment {
+  if (t.recorded > 0) return { status: "recorded" };
+  if (t.pending > 0) return { status: "processing" };
+  if (t.duplicate > 0 || t.paidOrders > 0) return { status: "already_recorded" };
+  return { status: "none" };
+}
+
+function requireConfig(): RazorpayConfig {
+  try {
+    const config = readRazorpayConfig();
+    if (config) return config;
+  } catch (error) {
+    if (!(error instanceof GatewayConfigError)) throw error;
+  }
+  throw new AccessError("Online payment is not available right now.");
+}
+
+/** "Check payment status" for the signed-in student's own item (e.g. after closing the browser mid-payment). */
+export async function recoverStudentPayment(user: SessionUser, target: PaymentTarget): Promise<RecoveredPayment> {
+  if (user.role !== "student") throw new AccessError("Only students can check their payments.");
+  const config = requireConfig();
+  const state = await db().runTransaction((tx) => readPaymentTarget(tx, target));
+  if (!state.owner.studentId || state.owner.studentId !== user.uid) throw new AccessError("That payment could not be found.");
+  return summarise(await reconcileOpenOrders(config, targetKey(target), { studentId: user.uid, guestRegistrationId: null }));
+}
+
+/** "Check payment status" for a guest registration (checkout token). */
+export async function recoverGuestPayment(registrationId: string, token: unknown): Promise<RecoveredPayment> {
+  const config = requireConfig();
+  const registration = await readGuestRegistration(registrationId, token);
+  if (!registration) throw new AccessError("That registration could not be found.");
+  return summarise(await reconcileOpenOrders(config, targetKey({ kind: "registration", registrationId }), { studentId: null, guestRegistrationId: registrationId }));
+}
+
+/**
+ * A signed payment.failed webhook: noted on the order for the academy (no
+ * money moved, nothing else changes; the student can simply try again).
+ */
+export async function recordGatewayPaymentFailure(input: { orderId: string; paymentId: string; code: string | null; description: string | null }): Promise<"noted" | "ignored"> {
+  const ref = col("gatewayOrders").doc(input.orderId);
+  return db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get("status") !== "created") return "ignored" as const;
+    tx.update(ref, {
+      failedAttempts: FieldValue.increment(1),
+      lastFailure: { paymentId: input.paymentId, code: input.code?.slice(0, 80) ?? null, description: input.description?.slice(0, 300) ?? null, at: FieldValue.serverTimestamp() },
+    });
+    return "noted" as const;
+  });
 }
