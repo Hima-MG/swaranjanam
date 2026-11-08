@@ -11,6 +11,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+/** What the initial payment pays for (shown before checkout; the server builds the checkout description itself). */
+export function registrationPaymentDescription(r: RegistrationRecord): string {
+  if (r.kind === "special") return `Full programme fee — ${r.courseTitle} (paid once; no monthly invoice)`;
+  const unit = r.mode === "batch" ? "class" : "session";
+  return `First ${unit} — ${ENROLMENT_TYPE_LABELS[r.enrolmentType]}, ${r.courseTitle}. Deducted on your first monthly invoice, never charged twice.`;
+}
+
 /** Enrolment type, the server-calculated rates and every learner (both for Learn Together). */
 export function RegistrationSummaryRows({ r }: { r: RegistrationRecord }) {
   const unit = r.mode === "batch" ? "class" : "session";
@@ -20,6 +27,7 @@ export function RegistrationSummaryRows({ r }: { r: RegistrationRecord }) {
       <>
         <Row label="Course type">Special Programme</Row>
         <Row label="Programme fee">{formatMoney(r.initialAmountMinor)} — full payment, once (no monthly invoice)</Row>
+        <Row label="Payment description">{registrationPaymentDescription(r)}</Row>
         <Row label="Payment">{r.status === "paid" ? "Paid — registration confirmed" : "Not paid yet"}</Row>
         <Row label="Learner">{r.details.learners[0]?.fullName ?? r.details.fullName}</Row>
       </>
@@ -43,7 +51,11 @@ export function RegistrationSummaryRows({ r }: { r: RegistrationRecord }) {
           {formatMoney(r.rateMinor)} per {unit}
         </Row>
       )}
-      <Row label="Initial payment">{formatMoney(r.initialAmountMinor)}</Row>
+      <Row label={shared ? "Total initial payment" : "Initial payment"}>
+        {formatMoney(r.initialAmountMinor)}
+        {shared ? ` (${formatMoney(r.perLearnerRateMinor)} × ${r.learnerCount} learners)` : ""}
+      </Row>
+      <Row label="Payment description">{registrationPaymentDescription(r)}</Row>
       {r.details.learners.map((l, i) => (
         <Row key={i} label={shared ? `Learner ${i + 1}` : "Learner"}>
           {l.fullName}

@@ -11,7 +11,7 @@ import { describe, test } from "node:test";
 
 import { ADVANCE_CORRECTION_REASONS, ADVANCE_NON_REFUNDABLE, ADVANCE_STATUS_LABELS, advanceReversalError, PENDING_DECISIONS } from "../../src/lib/lms/class-billing.ts";
 import { BLOCKED_PACKAGE_OPERATIONS, LEGACY_PACKAGES_READ_ONLY, legacyPackageBlock } from "../../src/lib/lms/legacy-packages.ts";
-import { parseProjectList, TEST_PROJECTS_ENV, testModeEnvironment } from "../../src/lib/payments/environment.ts";
+import { parseProjectList, paymentEnvironment, TEST_PROJECTS_ENV, testModeEnvironment } from "../../src/lib/payments/environment.ts";
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
@@ -43,10 +43,12 @@ describe("Razorpay Test Mode environment (fail-closed)", () => {
   });
   test("every Razorpay path checks the environment before using keys or recording a payment", () => {
     const razorpay = read("src/lib/payments/razorpay.ts");
-    assert.match(razorpay, /readRazorpayConfig\(\)[\s\S]*assertTestPaymentEnvironment\(\);\s*return \{ keyId/);
+    assert.match(razorpay, /readRazorpayConfig\(\)[\s\S]*assertPaymentEnvironment\(mode\);\s*return \{ mode, keyId/);
     const gateway = read("src/lib/lms/server/gateway.ts");
-    assert.match(gateway, /processVerifiedGatewayPayment\([^)]*\)[^{]*\{\s*\/\/[^\n]*\n\s*assertTestPaymentEnvironment\(\);/);
-    assert.match(gateway, /mode: "test"/);
+    assert.match(gateway, /processVerifiedGatewayPayment\([^)]*\)[^{]*\{\s*\/\/[^\n]*\n\s*const mode = requirePaymentMode\(\);/);
+    // Orders and payments carry the mode they were made in; another mode never settles them.
+    assert.match(gateway, /mode: config\.mode/);
+    assert.match(gateway, /\(order\.mode \?\? "test"\) !== mode/);
     // The webhook and student actions go through readRazorpayConfig (which throws when refused).
     assert.match(read("src/app/api/payments/razorpay/webhook/route.ts"), /readRazorpayConfig\(\)/);
     assert.match(read("src/app/(account)/dashboard/payment-actions.ts"), /instanceof GatewayConfigError/);
@@ -55,6 +57,22 @@ describe("Razorpay Test Mode environment (fail-closed)", () => {
     const button = read("src/components/lms/student/pay-online-button.tsx");
     assert.doesNotMatch(button, /lib\/payments\/razorpay"|RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|process\.env/);
     assert.match(read("src/lib/payments/razorpay.ts"), /^import "server-only";/);
+  });
+});
+
+describe("Razorpay Live Mode environment (fail-closed)", () => {
+  test("live keys are allowed only on a real (non-test) Firebase project", () => {
+    assert.deepEqual(paymentEnvironment("live", "swaranjanam-prod", ""), { allowed: true, projectId: "swaranjanam-prod" });
+    assert.equal(paymentEnvironment("live", "swaranjanam-prod", "swaranjanam-staging").allowed, true);
+  });
+  test("live keys are refused on emulator, listed test projects and a missing project", () => {
+    assert.equal(paymentEnvironment("live", "demo-swaranjanam", "").allowed, false);
+    assert.equal(paymentEnvironment("live", "swaranjanam-staging", "swaranjanam-staging").allowed, false);
+    for (const id of [undefined, null, "", " "]) assert.equal(paymentEnvironment("live", id, "").allowed, false);
+  });
+  test("test keys keep the Test Mode rules", () => {
+    assert.equal(paymentEnvironment("test", "swaranjanam-prod", "").allowed, false);
+    assert.equal(paymentEnvironment("test", "demo-x", "").allowed, true);
   });
 });
 

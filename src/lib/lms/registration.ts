@@ -219,10 +219,24 @@ export function ageOn(dateOfBirth: string, today: string): number {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** "+91 98470-00000" → "+919847000000" (E.164: + country code, 8–15 digits). Null when invalid. */
+const INDIAN_MOBILE = /^[6-9]\d{9}$/;
+
+/**
+ * Mobile number → E.164. India (+91) is assumed when no country code is given:
+ *   "98470 00000" / "098470 00000" / "91 98470 00000" / "+91 98470-00000" → "+919847000000".
+ * Other countries need "+" and their code ("+44 20 7946 0958"; 8–15 digits).
+ * An Indian number must be a 10-digit mobile starting 6–9. Null when invalid.
+ */
 export function normalizeMobile(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const compact = value.replace(/[\s\-().]/g, "");
+  let compact = value.replace(/[\s\-().]/g, "");
+  if (compact.startsWith("00")) compact = `+${compact.slice(2)}`;
+  if (!compact.startsWith("+")) {
+    if (/^0[6-9]\d{9}$/.test(compact)) compact = compact.slice(1);
+    if (/^91[6-9]\d{9}$/.test(compact)) compact = compact.slice(2);
+    return INDIAN_MOBILE.test(compact) ? `+91${compact}` : null;
+  }
+  if (compact.startsWith("+91")) return INDIAN_MOBILE.test(compact.slice(3)) ? compact : null;
   return /^\+[1-9]\d{7,14}$/.test(compact) ? compact : null;
 }
 
@@ -295,7 +309,7 @@ export function parseRegistrationDetails(
   const email = text(input.email, REGISTRATION_LIMITS.email).toLowerCase();
   if (!EMAIL.test(email)) errors.email = "Enter a valid email address.";
   const mobile = normalizeMobile(input.mobile);
-  if (!mobile) errors.mobile = "Enter the mobile number with its country code, e.g. +91 98470 00000.";
+  if (!mobile) errors.mobile = "Enter a 10-digit Indian mobile number (e.g. 98470 00000). Outside India, start with + and the country code.";
 
   const address = text(input.address, REGISTRATION_LIMITS.address);
   if (address.length < 5) errors.address = "Enter the address.";

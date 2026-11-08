@@ -6,7 +6,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { isTestKeyId, verifyCheckoutSignature, verifyWebhookSignature } from "../../src/lib/payments/razorpay-signature.ts";
+import { isTestKeyId, razorpayKeyMode, verifyCheckoutSignature, verifyWebhookSignature } from "../../src/lib/payments/razorpay-signature.ts";
 
 const SECRET = "test_secret_value";
 const sign = (payload, secret = SECRET) => createHmac("sha256", secret).update(payload).digest("hex");
@@ -43,10 +43,15 @@ describe("webhook signature", () => {
   });
 });
 
-describe("test mode only", () => {
-  test("only rzp_test_ key ids are accepted", () => {
+describe("key mode", () => {
+  test("rzp_test_ is Test Mode and never mistaken for Live Mode", () => {
     assert.equal(isTestKeyId("rzp_test_AbC123"), true);
+    assert.equal(razorpayKeyMode("rzp_test_AbC123"), "test");
     for (const bad of ["rzp_live_AbC123", "", null, undefined, "rzp_test_", "rzp_test_ab-c"]) assert.equal(isTestKeyId(bad), false, String(bad));
+  });
+  test("rzp_live_ is Live Mode; anything else is no key", () => {
+    assert.equal(razorpayKeyMode("rzp_live_AbC123"), "live");
+    for (const bad of ["rzp_live_", "rzp_LIVE_AbC", "live_AbC123", "rzp_live_ab c", "", null, undefined, 42]) assert.equal(razorpayKeyMode(bad), null, String(bad));
   });
 });
 

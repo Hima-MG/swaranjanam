@@ -52,10 +52,10 @@ async function Settings() {
       </section>
 
       <section aria-labelledby="online" className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-6 text-sm text-brown shadow-soft">
-        <h2 id="online" className="type-h3">Online payments (Razorpay Test Mode)</h2>
-        <p>{online.enabled ? "Enabled for this environment." : `Disabled — ${online.reason}`}</p>
+        <h2 id="online" className="type-h3">Online payments (Razorpay)</h2>
+        <p>{online.enabled ? `Enabled for this environment — ${online.mode === "live" ? "Live Mode (real payments)" : "Test Mode (no real money)"}.` : `Disabled — ${online.reason}`}</p>
         <p className="text-xs text-muted-foreground">
-          Test Mode payments are recorded only in emulator or explicitly listed non-production Firebase projects, never in the production database. Manual payments always work.
+          The mode follows the Razorpay key: Test Mode payments are recorded only in emulator or explicitly listed non-production Firebase projects, never in the production database; Live Mode keys are refused on those test projects. Manual payments always work.
         </p>
       </section>
 

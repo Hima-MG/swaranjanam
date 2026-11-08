@@ -275,8 +275,23 @@ export function RegistrationForm({
               )}
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="mobile">Mobile number (with country code)</Label>
-              <Input id="mobile" name="mobile" type="tel" autoComplete="tel" placeholder="+91 98470 00000" maxLength={20} defaultValue={d?.mobile} required {...invalid("mobile")} />
+              <Label htmlFor="mobile">Mobile number</Label>
+              <Input
+                id="mobile"
+                name="mobile"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel-national"
+                placeholder="98470 00000"
+                maxLength={20}
+                defaultValue={d?.mobile?.startsWith("+91") ? d.mobile.slice(3) : d?.mobile}
+                required
+                {...invalid("mobile")}
+                aria-describedby={fieldErrors.mobile ? "mobile-hint mobile-error" : "mobile-hint"}
+              />
+              <p id="mobile-hint" className="text-xs text-muted-foreground">
+                Indian number: just the 10 digits (+91 is added for you). Outside India, start with + and the country code.
+              </p>
               <FieldError id="mobile-error" message={err("mobile")} />
             </div>
           </div>

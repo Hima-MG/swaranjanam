@@ -6,7 +6,7 @@ import { refresh } from "next/cache";
 import { getSession } from "@/lib/auth/session";
 import { AccessError, runAction } from "@/lib/lms/server/access";
 import { writeAudit } from "@/lib/lms/server/audit";
-import { confirmGuestCheckoutPayment, createOrderForGuest, type CheckoutOrder, type ConfirmedCheckout } from "@/lib/lms/server/gateway";
+import { confirmGuestCheckoutPayment, createOrderForGuest, recoverGuestPayment, type CheckoutOrder, type ConfirmedCheckout, type RecoveredPayment } from "@/lib/lms/server/gateway";
 import { saveGuestRegistration } from "@/lib/lms/server/guest-enrolment";
 import { guestCookieName, parseGuestCookie } from "@/lib/lms/guest-cookie";
 import type { ActionResult } from "@/lib/lms/types";
@@ -74,6 +74,17 @@ export async function confirmGuestPayment(slug: string, input: { orderId: unknow
     const current = await readCookie(slug);
     if (!current) throw new AccessError("The payment could not be verified.");
     const result = await confirmGuestCheckoutPayment(current.registrationId, current.token, input);
+    refresh();
+    return result;
+  });
+}
+
+/** "Check payment status" for this browser's guest registration (records a captured payment whose confirmation was lost). */
+export async function checkGuestPayment(slug: string): Promise<ActionResult<RecoveredPayment>> {
+  return runAction("checkGuestPayment", async () => {
+    const current = await readCookie(slug);
+    if (!current) throw new AccessError("Your registration could not be found in this browser.");
+    const result = await recoverGuestPayment(current.registrationId, current.token);
     refresh();
     return result;
   });
