@@ -9,7 +9,8 @@ import { MAX_BATCH_CAPACITY, parseCapacity } from "@/lib/lms/class-billing";
 import { ACADEMY_TIME_ZONE, formatClassTime, normalizeMeetUrl, parseClassTimes } from "@/lib/lms/classes";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
-import { addMemberTx, mapBatch, mapMember, removeMemberTx, transferMemberTx } from "@/lib/lms/server/batches";
+import { parseWeeklySchedule, scheduleLabel } from "@/lib/lms/registration";
+import { addMemberTx, createBatchRecord, mapBatch, mapMember, removeMemberTx, transferMemberTx } from "@/lib/lms/server/batches";
 import { classBillingConfigRef, mapAccount, mapConfig } from "@/lib/lms/server/class-billing";
 import { col, db, mapCourse } from "@/lib/lms/server/db";
 import { assertStudent } from "@/lib/lms/server/students";
@@ -24,9 +25,14 @@ export interface BatchInput {
   name: unknown;
   courseId: unknown;
   teacherId: unknown;
-  schedule: unknown;
+  /** Class days ("mon" … "sun") and start/end times (IST, "HH:MM"). */
+  days: unknown;
+  startTime: unknown;
+  endTime: unknown;
   meetUrl: unknown;
   capacity: unknown;
+  /** "active" or "inactive". */
+  status?: unknown;
 }
 
 async function teacherFor(teacherId: unknown): Promise<{ uid: string; name: string }> {
@@ -45,14 +51,15 @@ function parseBatch(input: BatchInput) {
   const errors: Record<string, string> = {};
   const name = cleanText(input?.name, 80);
   if (!name) errors.name = "Enter a batch name.";
-  const schedule = cleanText(input?.schedule, 120);
-  if (!schedule) errors.schedule = "Describe the schedule, e.g. Saturdays, 7–8 PM IST.";
+  const weekly = parseWeeklySchedule({ days: input?.days, start: input?.startTime, end: input?.endTime });
+  Object.assign(errors, weekly.errors);
   const rawMeet = typeof input?.meetUrl === "string" ? input.meetUrl.trim() : "";
   const meetUrl = rawMeet ? normalizeMeetUrl(rawMeet) : null;
   if (rawMeet && !meetUrl) errors.meetUrl = "Enter a Google Meet link like https://meet.google.com/abc-defg-hij";
   const capacity = parseCapacity(input?.capacity ?? MAX_BATCH_CAPACITY);
   if (capacity === null) errors.capacity = `Enter a capacity from 1 to ${MAX_BATCH_CAPACITY}.`;
-  return { name, schedule, meetUrl, capacity: capacity ?? MAX_BATCH_CAPACITY, errors };
+  const active = input?.status !== "inactive" && input?.status !== "archived";
+  return { name, weekly: weekly.value, meetUrl, capacity: capacity ?? MAX_BATCH_CAPACITY, active, errors };
 }
 
 export async function createBatch(input: BatchInput): Promise<ActionResult<{ batchId: string }>> {
@@ -63,38 +70,30 @@ export async function createBatch(input: BatchInput): Promise<ActionResult<{ bat
     if (Object.keys(parsed.errors).length) throw new AccessError("Please fix the highlighted fields.", parsed.errors);
     const [course, teacher] = await Promise.all([col("courses").doc(input.courseId as string).get().then(mapCourse), teacherFor(input?.teacherId)]);
     if (!course) throw new AccessError("Please fix the highlighted fields.", { courseId: "That course could not be found." });
-    const ref = col("batches").doc();
-    await ref.create({
+    const batchId = await createBatchRecord(user, {
       name: parsed.name,
-      courseId: course.id,
-      courseTitle: course.title,
-      teacherId: teacher.uid,
-      teacherName: teacher.name,
-      schedule: parsed.schedule,
+      course: { id: course.id, title: course.title },
+      teacher,
+      weekly: parsed.weekly!,
       meetUrl: parsed.meetUrl,
       capacity: parsed.capacity,
-      memberCount: 0,
-      status: "active",
-      createdAt: FieldValue.serverTimestamp(),
-      createdBy: user.uid,
-      updatedAt: FieldValue.serverTimestamp(),
-      history: [{ at: Timestamp.now(), by: user.uid, byEmail: user.email, change: "Batch created" }],
+      active: parsed.active,
     });
-    await writeAudit(user, { action: "batch.create", targetType: "batch", targetId: ref.id, summary: `Created batch "${parsed.name}" for ${course.title}` });
+    await writeAudit(user, { action: "batch.create", targetType: "batch", targetId: batchId, summary: `Created batch "${parsed.name}" for ${course.title} (${scheduleLabel(parsed.weekly!)})` });
     refresh();
-    return { batchId: ref.id };
+    return { batchId };
   });
 }
 
 /** Edits a batch. A new Meet link is also applied to the batch's future scheduled classes. */
-export async function updateBatch(batchId: unknown, input: BatchInput & { status?: unknown }): Promise<ActionResult> {
+export async function updateBatch(batchId: unknown, input: BatchInput): Promise<ActionResult> {
   return runAction("updateBatch", async () => {
     const user = await requireActionUser("teacher");
     if (!isValidId(batchId)) throw new AccessError("That batch could not be found.");
     const parsed = parseBatch(input);
     if (Object.keys(parsed.errors).length) throw new AccessError("Please fix the highlighted fields.", parsed.errors);
     const teacher = await teacherFor(input?.teacherId);
-    const status = input?.status === "archived" ? "archived" : "active";
+    const status = parsed.active ? "active" : "archived";
     const ref = col("batches").doc(batchId);
     const changes = await db().runTransaction(async (tx) => {
       const batch = mapBatch(await tx.get(ref));
@@ -102,13 +101,16 @@ export async function updateBatch(batchId: unknown, input: BatchInput & { status
       if (parsed.capacity < batch.memberCount) {
         throw new AccessError("Please fix the highlighted fields.", { capacity: `The batch already has ${batch.memberCount} learners.` });
       }
-      if (status === "archived" && batch.memberCount > 0) throw new AccessError("Remove or transfer all learners before archiving the batch.");
+      if (status === "archived" && batch.memberCount > 0) throw new AccessError("Remove or transfer all learners before making the batch inactive.");
       const linkChanged = (parsed.meetUrl ?? null) !== batch.meetUrl;
       const future = linkChanged && parsed.meetUrl ? await tx.get(col("liveClasses").where("batchId", "==", batch.id)) : null;
       const upcoming = future ? future.docs.filter((d) => d.get("status") === "scheduled" && (d.get("endAt")?.toMillis?.() ?? 0) > Date.now()) : [];
       tx.update(ref, {
         name: parsed.name,
-        schedule: parsed.schedule,
+        days: parsed.weekly!.days,
+        startTime: parsed.weekly!.start,
+        endTime: parsed.weekly!.end,
+        schedule: scheduleLabel(parsed.weekly!),
         meetUrl: parsed.meetUrl,
         capacity: parsed.capacity,
         teacherId: teacher.uid,
@@ -141,7 +143,7 @@ export async function addBatchMember(batchId: unknown, studentIdInput: unknown):
       action: "batch.addMember",
       targetType: "batch",
       targetId: batchId,
-      summary: `Added ${student.label} to "${result.batchName}"${result.created ? " — billing account opened (₹400 advance awaiting)" : ""}`,
+      summary: `Added ${student.label} to "${result.batchName}"${result.created ? " — billing account opened (₹400 first-class payment awaiting)" : ""}`,
     });
     refresh();
     return null;
@@ -244,6 +246,7 @@ export async function scheduleBatchClass(batchId: unknown, input: BatchClassInpu
         attendance: null,
         outcomeNote: null,
         outcomeRecordedAt: null,
+        recordingVideoId: null,
         outcomeRecordedBy: null,
         packageId: null,
         batchId: batch.id,

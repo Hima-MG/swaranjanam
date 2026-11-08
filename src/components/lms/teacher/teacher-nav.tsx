@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bell,
   BookOpen,
+  CalendarCheck,
   CalendarClock,
   IndianRupee,
   LayoutDashboard,
@@ -35,17 +36,24 @@ export interface TeacherNavItem {
   exact?: boolean;
 }
 
-// Only sections that exist are listed — no placeholder links.
+// Only sections that exist are listed — no placeholder links. The main workflows
+// (courses, enrolment, batches, individual schedules, attendance, invoicing)
+// stay separate; everything else is under "More".
 export const TEACHER_NAV: TeacherNavItem[] = [
   { href: "/teacher", label: "Overview", icon: LayoutDashboard, exact: true },
-  { href: "/teacher/courses", label: "Courses", icon: BookOpen },
-  { href: "/teacher/classes", label: "Classes", icon: CalendarClock },
-  { href: "/teacher/students", label: "Students", icon: Users },
-  { href: "/teacher/enrolment-requests", label: "Enrolment requests", icon: UserPlus },
-  { href: "/teacher/batches", label: "Batches", icon: Boxes },
-  { href: "/teacher/billing", label: "Billing", icon: Receipt },
+  { href: "/teacher/courses", label: "Course management", icon: BookOpen },
+  { href: "/teacher/registrations", label: "Registered students", icon: UserPlus },
+  { href: "/teacher/batches", label: "Manage batches", icon: Boxes },
+  { href: "/teacher/schedules", label: "Individual schedules", icon: CalendarCheck },
+  { href: "/teacher/classes", label: "Classes & attendance", icon: CalendarClock },
+  { href: "/teacher/billing", label: "Payments & invoices", icon: Receipt },
+  { href: "/teacher/settings", label: "Profile & settings", icon: Settings },
+];
+
+export const TEACHER_NAV_MORE: TeacherNavItem[] = [
+  { href: "/teacher/students", label: "All students", icon: Users },
   { href: "/teacher/packages", label: "Packages (legacy)", icon: Package },
-  { href: "/teacher/payments", label: "Payments", icon: IndianRupee },
+  { href: "/teacher/payments", label: "Payment records", icon: IndianRupee },
   { href: "/teacher/pricing", label: "Fees & pricing", icon: Tags },
   { href: "/teacher/submissions", label: "Submissions", icon: Mic },
   { href: "/teacher/reviews", label: "Reviews", icon: Star },
@@ -54,7 +62,6 @@ export const TEACHER_NAV: TeacherNavItem[] = [
   { href: "/teacher/announcements", label: "Announcements", icon: Megaphone },
   { href: "/teacher/notifications", label: "Notifications", icon: Bell },
   { href: "/teacher/activity", label: "Activity log", icon: Activity },
-  { href: "/teacher/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string | null, item: TeacherNavItem) {
@@ -65,8 +72,19 @@ function isActive(pathname: string | null, item: TeacherNavItem) {
 function NavList({ pathname, layout }: { pathname: string | null; layout: "sidebar" | "tabs" }) {
   const sidebar = layout === "sidebar";
   return (
+    // Tabs (small screens): one scrollable row; sidebar: main workflows, then "More".
+    <div className={cn(!sidebar && "flex gap-1")}>
+      <NavItems items={TEACHER_NAV} pathname={pathname} sidebar={sidebar} />
+      {sidebar && <p className="mt-6 mb-2 px-3 text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">More</p>}
+      <NavItems items={TEACHER_NAV_MORE} pathname={pathname} sidebar={sidebar} />
+    </div>
+  );
+}
+
+function NavItems({ items, pathname, sidebar }: { items: TeacherNavItem[]; pathname: string | null; sidebar: boolean }) {
+  return (
     <ul className={cn(sidebar ? "flex flex-col gap-1" : "flex gap-1")}>
-      {TEACHER_NAV.map((item) => {
+      {items.map((item) => {
         const active = isActive(pathname, item);
         const Icon = item.icon;
         return (

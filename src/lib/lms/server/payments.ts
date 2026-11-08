@@ -41,8 +41,9 @@ export function mapPayment(snapshot: DocumentSnapshot<DocumentData>): PaymentRec
     courseId: String(d.courseId ?? ""),
     enrollmentId: String(d.enrollmentId ?? ""),
     packageId: isValidId(d.packageId) ? d.packageId : null,
-    purpose: d.purpose === "advance" || d.purpose === "invoice" || d.purpose === "session" ? d.purpose : null,
+    purpose: d.purpose === "advance" || d.purpose === "invoice" || d.purpose === "session" || d.purpose === "registration" ? d.purpose : null,
     sessionChargeId: isValidId(d.sessionChargeId) ? d.sessionChargeId : null,
+    registrationId: isValidId(d.registrationId) ? d.registrationId : null,
     accountId: isValidId(d.accountId) ? d.accountId : null,
     invoiceId: isValidId(d.invoiceId) ? d.invoiceId : null,
     learnerIds: Array.isArray(d.learnerIds)

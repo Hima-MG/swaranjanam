@@ -93,6 +93,9 @@ export async function isBillingSuspended(studentId: string, courseId: string): P
  */
 export async function getStudentCourseAccess(user: SessionUser, courseId: string) {
   if (user.role !== "student" || !isValidId(courseId)) return null;
+  // An invoice past its payment deadline suspends access now, not only at the next scheduled run.
+  // (Imported lazily: class-billing imports this module.)
+  await (await import("@/lib/lms/server/class-billing")).enforceOverdueForStudent(user.uid);
   const [course, enrollment, suspended] = await Promise.all([
     readCourse(courseId),
     getActiveEnrollment(user.uid, courseId),

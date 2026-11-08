@@ -1,4 +1,4 @@
-// Node module hooks for the emulator tests (test-only; never used by the app).
+// Node module hooks for the unit and emulator tests (test-only; never used by the app).
 //  * "@/x"          → src/x.ts | .tsx | /index.ts   (the tsconfig path alias)
 //  * "server-only"  → empty stub (the guard only matters inside Next.js)
 //  * "next/headers", "next/navigation", "next/server", "next/cache"

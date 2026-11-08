@@ -160,6 +160,7 @@ describe("toStudentView", () => {
     attendance: "absent",
     outcomeNote: "PRIVATE TEACHER NOTE",
     outcomeRecordedAt: null,
+    recordingVideoId: null,
     createdBy: "teacher-1",
     createdByEmail: "teacher@example.com",
     createdAt: null,
@@ -216,7 +217,7 @@ describe("Meet link release uses the server clock at exact boundaries", () => {
     id: "c1", studentId: "s", title: "T", startAt: "2026-10-12T12:30:00.000Z", endAt: "2026-10-12T13:30:00.000Z",
     timeZone: "Asia/Kolkata", date: "2026-10-12", startTime: "18:00", endTime: "19:00",
     meetUrl: "https://meet.google.com/abc-defg-hij", notes: null, status: "scheduled", cancelledAt: null, cancelReason: null,
-    attendance: null, outcomeNote: null, outcomeRecordedAt: null, createdBy: null, createdByEmail: null, createdAt: null,
+    attendance: null, outcomeNote: null, outcomeRecordedAt: null, recordingVideoId: null, createdBy: null, createdByEmail: null, createdAt: null,
     updatedBy: null, updatedByEmail: null, updatedAt: null,
   };
   const linkAt = (iso, overrides = {}) => toStudentView({ ...record, ...overrides }, "T", Date.parse(iso)).meetUrl;

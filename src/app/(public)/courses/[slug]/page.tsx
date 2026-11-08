@@ -15,8 +15,11 @@ import { Container } from "@/components/ui/container";
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
 import { FEE_TERMS } from "@/lib/catalog/public-pricing";
+import { PROGRAMME_TYPE_LABELS } from "@/lib/lms/programme";
 import { getPublishedCourseBySlug, getPublishedCourses, relatedCourses } from "@/lib/catalog/server";
+import { BEFORE_FIRST_CLASS, CLASS_STRUCTURE, WORKBOOK_FOUNDATION_SLUGS } from "@/data/before-first-class";
 import { formatMoney } from "@/lib/format";
+import { SHARED_RATES } from "@/lib/lms/registration";
 import { COURSE_AVAILABILITY_LABELS } from "@/types/course";
 
 // Course pages are rendered on first visit (behind loading.tsx) and cached
@@ -111,26 +114,46 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
           <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card lg:sticky lg:top-24">
             <CourseThumbnail course={course} priority sizes="(min-width: 1024px) 380px, 100vw" />
             <div className="flex flex-col gap-5 p-6">
-              <CourseFeeLine fee={course.fee} />
-              {course.fee?.siblingDiscount && (
+              <CourseFeeLine fee={course.fee} programme={course.programme} />
+              {!course.programme && course.fee && (course.fee.batchMinor !== null || course.fee.individualMinor !== null) && (
                 <p className="-mt-3 text-sm text-muted-foreground">
-                  Siblings / two learners on one device: {formatMoney(course.fee.siblingDiscount.batchMinor)} per learner per batch session (
-                  {course.fee.siblingDiscount.percent}% off).
+                  Learn Together (2 people, one login):{" "}
+                  {[
+                    course.fee.batchMinor !== null ? `batch ${formatMoney(SHARED_RATES.batchMinor)} per person (${formatMoney(SHARED_RATES.batchMinor * 2)} for two)` : "",
+                    course.fee.individualMinor !== null
+                      ? `one-to-one ${formatMoney(SHARED_RATES.individualMinor)} per person (${formatMoney(SHARED_RATES.individualMinor * 2)} for two)`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}{" "}
+                  per session.
                 </p>
               )}
               <div className="flex flex-col gap-3">
                 {open ? (
                   <>
                     <Button asChild size="lg" className="w-full">
-                      <Link href={`/dashboard/enrol/${course.slug}`}>Enrol now</Link>
+                      <Link href={`/enrol/${course.slug}`}>Enrol Now</Link>
                     </Button>
+                    {course.programme ? (
+                      <p className="-mt-1 text-xs text-muted-foreground">
+                        Add the learner&apos;s details, then pay the full programme fee ({formatMoney(course.programme.feeMinor)}) once. Your registration is confirmed
+                        when the payment is verified — there is no monthly invoice.
+                      </p>
+                    ) : (
                     <p className="-mt-1 text-xs text-muted-foreground">
-                      Sign in or create a free account, choose batch or individual classes and see exactly what you pay. Nothing is charged until you are
-                      placed.
+                      Choose batch or individual classes, add the learner&apos;s details and preferred times, then pay for the first class{" "}
+                      {course.fee
+                        ? `(${[course.fee.batchMinor !== null ? `${formatMoney(course.fee.batchMinor)} batch` : "", course.fee.individualMinor !== null ? `${formatMoney(course.fee.individualMinor)} individual` : ""].filter(Boolean).join(" or ")})`
+                        : ""}
+                      . It is deducted on your first monthly invoice, and your student login is created once the payment is verified.
                     </p>
+                    )}
                   </>
                 ) : (
-                  <p className="rounded-xl bg-cream-deep/70 p-3 text-sm text-brown">Coming soon — not yet open for enrolment.</p>
+                  <p className="rounded-xl bg-cream-deep/70 p-3 text-sm text-brown">
+                    {course.availability === "closed" ? "Closed for new enrolments." : "Coming soon — not yet open for enrolment."}
+                  </p>
                 )}
                 <Button asChild size="lg" variant="outline" className="w-full">
                   <Link href="/contact">{open ? "Ask a question" : "Ask about this course"}</Link>
@@ -158,7 +181,85 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
             outcomesMl={course.outcomesMl}
           />
 
-          {open && (
+          {course.prerequisites.length > 0 && (
+            <section aria-labelledby="prerequisites" className="flex flex-col gap-3">
+              <h2 id="prerequisites" className="type-h2">
+                Before you start
+              </h2>
+              <ul className="flex flex-col gap-2 text-brown">
+                {course.prerequisites.map((p) => (
+                  <li key={p} className="before:mr-2 before:text-gold before:content-['•']">
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {open && WORKBOOK_FOUNDATION_SLUGS.includes(course.slug) && (
+            <section aria-labelledby="class-structure" className="flex flex-col gap-3">
+              <h2 id="class-structure" className="type-h2">
+                What happens in each class
+              </h2>
+              <p className="text-brown">{CLASS_STRUCTURE}</p>
+            </section>
+          )}
+
+          {open && WORKBOOK_FOUNDATION_SLUGS.includes(course.slug) && (
+            <section aria-labelledby="before-first-class" className="flex flex-col gap-4">
+              <h2 id="before-first-class" className="type-h2">
+                Before your first class
+              </h2>
+              <ul className="flex flex-col gap-4">
+                {BEFORE_FIRST_CLASS.map((b) => (
+                  <li key={b.item} className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+                    <h3 className="font-semibold text-brown">{b.item}</h3>
+                    <p className="mt-1 text-brown">{b.details}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {b.how}
+                      {b.link && (
+                        <>
+                          {" · "}
+                          <a href={b.link} target="_blank" rel="noopener noreferrer" className="font-medium text-maroon hover:underline">
+                            More details
+                            <span className="sr-only"> (opens in a new tab)</span>
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {course.programme && (
+            <section aria-labelledby="programme-details" className="flex flex-col gap-4">
+              <h2 id="programme-details" className="type-h2">
+                Programme details
+              </h2>
+              <ul className="flex flex-col gap-2 text-brown">
+                <li>
+                  {PROGRAMME_TYPE_LABELS[course.programme.programmeType]} · {course.programme.startDate} to {course.programme.endDate}
+                  {course.programme.durationText ? ` · ${course.programme.durationText}` : ""}
+                </li>
+                <li>Total fee {formatMoney(course.programme.feeMinor)}, paid once in full. No first-class payment and no monthly invoice.</li>
+                {course.programme.maxParticipants !== null && <li>Up to {course.programme.maxParticipants} participants.</li>}
+                <li>{course.programme.recordingsAvailable ? "Session recordings are available to registered participants." : "Session recordings are not provided."}</li>
+              </ul>
+              {course.programme.sessions.length > 0 && (
+                <ol className="flex flex-col gap-1 text-sm text-brown">
+                  {course.programme.sessions.map((s, i) => (
+                    <li key={`${s.date}-${s.start}`}>
+                      Session {i + 1}: {s.date}, {s.start}–{s.end} IST · {s.title}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+          )}
+
+          {open && !course.programme && (
             <section aria-labelledby="how-fees-work" className="flex flex-col gap-4">
               <h2 id="how-fees-work" className="type-h2">
                 How fees work

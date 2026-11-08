@@ -81,7 +81,7 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
         const input = Object.fromEntries(
           [
             "slug", "subtitle", "subtitleMl", "level", "category", "format", "tag",
-            "duration", "ageGroup", "instructor", "availability", "outcomes", "outcomesMl",
+            "duration", "ageGroup", "instructor", "availability", "outcomes", "outcomesMl", "prerequisites",
           ].map((key) => [key, String(data.get(key) ?? "")]),
         );
         run(() => updateCourseCatalog(course.id, { ...input, featured: data.get("featured") === "on" }), {
@@ -190,6 +190,9 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
           </Field>
           <Field id="catalog-outcomesMl" label="What you will learn (Malayalam)" hint="One point per line." error={e.outcomesMl}>
             <Textarea id="catalog-outcomesMl" name="outcomesMl" defaultValue={course.outcomesMl.join("\n")} rows={5} lang="ml" />
+          </Field>
+          <Field id="catalog-prerequisites" label="Prerequisites" hint="One point per line. Leave empty if none." error={e.prerequisites}>
+            <Textarea id="catalog-prerequisites" name="prerequisites" defaultValue={course.prerequisites.join("\n")} rows={3} />
           </Field>
         </div>
       </fieldset>

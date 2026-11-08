@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { confirmOnlinePayment, startOnlinePayment } from "@/app/(account)/dashboard/payment-actions";
+import { confirmGuestPayment, startGuestPayment } from "@/app/(public)/enrol/actions";
 import { FormAlert } from "@/components/forms/form-alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/loading-state";
@@ -41,7 +42,18 @@ function loadCheckout(): Promise<void> {
  * The amount comes from the server. Success shown here is only what the
  * SERVER confirmed after verifying the payment with Razorpay.
  */
-export function PayOnlineButton({ kind, id, label }: { kind: "advance" | "invoice" | "session"; id: string; label: string }) {
+export function PayOnlineButton({
+  kind,
+  id,
+  label,
+  guestSlug,
+}: {
+  kind: "advance" | "invoice" | "session" | "registration";
+  id: string;
+  label: string;
+  /** Guest checkout (signed out): the registration is identified by its checkout cookie for this course. */
+  guestSlug?: string;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "success" | "info"; text: string } | null>(null);
@@ -50,7 +62,7 @@ export function PayOnlineButton({ kind, id, label }: { kind: "advance" | "invoic
     setBusy(true);
     setMessage(null);
     try {
-      const order = await startOnlinePayment(kind, id);
+      const order = guestSlug ? await startGuestPayment(guestSlug) : await startOnlinePayment(kind, id);
       if (!order.ok) throw new Error(order.error);
       await loadCheckout();
       if (!window.Razorpay) throw new Error("Online payment could not be loaded. Please try again.");
@@ -64,7 +76,8 @@ export function PayOnlineButton({ kind, id, label }: { kind: "advance" | "invoic
         theme: { color: "#7a1f3d" },
         handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
           setMessage({ tone: "info", text: "Verifying your payment with the server…" });
-          const result = await confirmOnlinePayment({ orderId: response.razorpay_order_id, paymentId: response.razorpay_payment_id, signature: response.razorpay_signature });
+          const verified = { orderId: response.razorpay_order_id, paymentId: response.razorpay_payment_id, signature: response.razorpay_signature };
+          const result = guestSlug ? await confirmGuestPayment(guestSlug, verified) : await confirmOnlinePayment(verified);
           if (!result.ok) setMessage({ tone: "error", text: result.error });
           else if (result.data.status === "processing") setMessage({ tone: "info", text: "Payment received by Razorpay and is still being confirmed. This page will update once it is verified." });
           else setMessage({ tone: "success", text: `Payment verified${result.data.receiptNumber ? ` — receipt ${result.data.receiptNumber}` : ""}.` });

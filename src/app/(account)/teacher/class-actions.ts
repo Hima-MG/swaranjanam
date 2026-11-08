@@ -1,6 +1,6 @@
 "use server";
 
-import { FieldValue, Timestamp, type DocumentReference, type Transaction } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { refresh } from "next/cache";
 
 import {
@@ -14,24 +14,21 @@ import { writeAudit } from "@/lib/lms/server/audit";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
 import { legacyPackageBlock } from "@/lib/lms/legacy-packages";
 import { historyEntry, mapPackage } from "@/lib/lms/server/billing";
-import { periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
 import {
   applyClassCharge,
   applySessionCancel,
-  classBillingConfigRef,
   evaluateSuspension,
-  issueDueCycleInvoices,
+  issueDueMonthlyInvoices,
   mapAccount,
-  mapConfig,
   prepareClassCharge,
   prepareSessionCancel,
   readSessionCharge,
-  writeSessionCharge,
   type ChargePlan,
   type SessionCancelPlan,
 } from "@/lib/lms/server/class-billing";
-import { mapLiveClass } from "@/lib/lms/server/classes";
+import { mapLiveClass, sessionSiblings } from "@/lib/lms/server/classes";
 import { col, db } from "@/lib/lms/server/db";
+import { saveClassRecording } from "@/lib/lms/server/recordings";
 import { assertStudent } from "@/lib/lms/server/students";
 import {
   ACADEMY_TIME_ZONE,
@@ -85,18 +82,6 @@ function parseCommon(input: ClassInput) {
   return { title, meetUrl, notes, errors };
 }
 
-/** All class records of one session (pair and batch sessions have one per learner). */
-async function sessionSiblings(tx: Transaction, record: LiveClassRecord) {
-  if ((!record.packageId && !record.batchId) || !record.sessionKey) return [{ ref: col("liveClasses").doc(record.id), record }];
-  const snap = await tx.get(col("liveClasses").where("sessionKey", "==", record.sessionKey));
-  return snap.docs
-    .map((d) => ({ ref: d.ref as DocumentReference, record: mapLiveClass(d) }))
-    .filter(
-      (s): s is { ref: DocumentReference; record: LiveClassRecord } =>
-        s.record !== null && s.record.packageId === record.packageId && s.record.batchId === record.batchId,
-    );
-}
-
 export async function scheduleClass(input: ClassInput): Promise<ActionResult<{ classId: string }>> {
   return runAction("scheduleClass", async () => {
     const user = await requireActionUser("teacher");
@@ -122,6 +107,7 @@ export async function scheduleClass(input: ClassInput): Promise<ActionResult<{ c
       attendance: null,
       outcomeNote: null,
       outcomeRecordedAt: null,
+      recordingVideoId: null,
       outcomeRecordedBy: null,
       createdBy: user.uid,
       createdByEmail: user.email,
@@ -137,18 +123,15 @@ export async function scheduleClass(input: ClassInput): Promise<ActionResult<{ c
       const student = await assertStudent(input?.studentId);
       const ref = col("liveClasses").doc();
       if (input?.billingAccountId) {
-        // Individual session: the class and its per-session charge are created together.
+        // Individual session: billed on the monthly invoice once its outcome is recorded (nothing is charged now).
         if (!isValidId(input.billingAccountId)) throw new AccessError("Please fix the highlighted fields.", { billingAccountId: "Choose an account." });
         const accountId = input.billingAccountId;
         await db().runTransaction(async (tx) => {
-          const [accountSnap, configSnap] = await Promise.all([tx.get(col("billingAccounts").doc(accountId)), tx.get(classBillingConfigRef())]);
-          const account = mapAccount(accountSnap);
+          const account = mapAccount(await tx.get(col("billingAccounts").doc(accountId)));
           if (!account || account.mode !== "individual" || account.status !== "active" || account.studentId !== student.uid) {
             throw new AccessError("Please fix the highlighted fields.", { billingAccountId: "Choose this student's active individual billing account." });
           }
-          const version = rateVersionForPeriod(mapConfig(configSnap).rateVersions, periodOf(times.start.toISOString()));
           tx.create(ref, { ...base, studentId: student.uid, packageId: null, sessionKey: null, batchId: null, billingAccountId: account.id, cancelKind: null });
-          writeSessionCharge(tx, { classId: ref.id, account, title: common.title, date: times.date, startTime: times.startTime, startAt: times.start, version, actor: user });
         });
       } else {
         await ref.create({ ...base, studentId: student.uid, packageId: null, sessionKey: null, batchId: null, billingAccountId: null, cancelKind: null });
@@ -326,7 +309,8 @@ export async function cancelClass(classId: unknown, reasonInput: unknown, kindIn
       const sessionPlans: SessionCancelPlan[] = [];
       for (const t of targets) {
         plans.push(await prepareClassCharge(tx, t.record, CANCEL_OUTCOME[kind], nowIso));
-        // Individual session: ≥ 24 h before the start → no charge; < 24 h by the student → still payable.
+        // Student cancellation: billable on the monthly invoice (prepareClassCharge), or still payable for a
+        // session with an earlier per-session charge (below). Academy cancellation: never charged.
         sessionPlans.push(t.record.batchId ? { kind: "none" } : await prepareSessionCancel(tx, t.record, kind, nowMs));
       }
 
@@ -376,7 +360,7 @@ export async function cancelClass(classId: unknown, reasonInput: unknown, kindIn
       action: "class.cancel",
       targetType: title.batchId ? "batch" : title.packageId ? "package" : "student",
       targetId: title.batchId ?? title.packageId ?? title.studentId,
-      summary: `Cancelled ${title.label} "${title.title}" (${title.when})${title.learners > 1 ? ` for ${title.learners} learners` : ""}${reason ? ` — ${reason}` : ""}${title.billed ? ` — billed for ${title.billed} learner(s) under the billing policy` : ""}${title.sessionFee === "payable" ? " — individual session fee remains payable (less than 24 hours' notice)" : title.sessionFee === "no_charge" ? " — individual session: no charge" : ""}`,
+      summary: `Cancelled ${title.label} "${title.title}" (${title.when})${title.learners > 1 ? ` for ${title.learners} learners` : ""}${reason ? ` — ${reason}` : ""}${title.billed ? ` — billed for ${title.billed} learner(s) under the billing policy` : ""}${title.sessionFee === "payable" ? " — individual session fee remains payable (cancelled by the student)" : title.sessionFee === "no_charge" ? " — individual session: no charge" : ""}`,
     });
     refresh();
     return null;
@@ -469,11 +453,11 @@ export async function recordClassOutcome(classId: unknown, attendanceInput: unkn
         accountId: charge.kind === "charge" ? charge.account.id : null,
       };
     });
-    // A class in a cycle's final week issues that cycle's invoice now (idempotent);
-    // the scheduled job issues it at the checkpoint otherwise.
+    // On the month's last day (from 23:00 IST) this issues the monthly invoice now (idempotent);
+    // otherwise the scheduled job issues it on the last calendar day of the month.
     let issued: string[] = [];
     if (info.accountId) {
-      issued = (await issueDueCycleInvoices(info.accountId, user)).created;
+      issued = (await issueDueMonthlyInvoices(info.accountId, user)).created;
       await evaluateSuspension(info.accountId, user);
     }
     await writeAudit(user, {
@@ -482,9 +466,25 @@ export async function recordClassOutcome(classId: unknown, attendanceInput: unkn
       targetId: info.studentId,
       summary: `Recorded "${info.title}" as completed (attendance: ${attendance})${
         info.packageId ? (info.consumed ? ` — 1 package credit used, ${info.creditsRemaining} left` : " — credit already counted for this session") : ""
-      }${info.chargeKind === "charge" ? (info.coversFirst ? " — first class, paid by the first-class payment" : " — charged to the current billing cycle") : info.chargeKind === "already" ? " — already charged" : ""}${
+      }${info.chargeKind === "charge" ? (info.coversFirst ? " — first class/session, paid by the initial enrolment payment" : " — billed on the monthly invoice") : info.chargeKind === "already" ? " — already charged" : ""}${
         issued.length ? ` — invoice issued (${issued.join(", ")})` : ""
       }`,
+    });
+    refresh();
+    return null;
+  });
+}
+
+/** Adds, replaces or removes the YouTube recording of a held class (url null/"" removes it). Rules: lib/lms/server/recordings.ts. */
+export async function setClassRecording(classId: unknown, urlInput: unknown): Promise<ActionResult> {
+  return runAction("setClassRecording", async () => {
+    const user = await requireActionUser("teacher");
+    const info = await saveClassRecording(user, classId, urlInput);
+    await writeAudit(user, {
+      action: "class.recording",
+      targetType: "student",
+      targetId: info.studentId,
+      summary: `${info.change} for "${info.title}" on ${info.date}`,
     });
     refresh();
     return null;

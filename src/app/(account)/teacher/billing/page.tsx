@@ -12,18 +12,24 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
-import { ADVANCE_STATUS_LABELS, BILLING_MODE_LABELS } from "@/lib/lms/class-billing";
+import { ADVANCE_STATUS_LABELS, BILLING_MODE_LABELS, paymentPurposeLabel } from "@/lib/lms/class-billing";
 import { listCourseOptions } from "@/lib/lms/server/batches";
 import { getClassBillingConfig, listBillingAccounts } from "@/lib/lms/server/class-billing";
 import { listStudentOptions } from "@/lib/lms/server/classes";
 
 export const metadata: Metadata = { title: "Billing · Teacher" };
 
-const DUE_LABEL = { not_due: "Not yet due", grace: "In grace period", overdue: "Overdue" } as const;
+/** One consistent payment-status vocabulary for invoices. */
+function invoiceStatus(i: { dueState: "not_due" | "grace" | "overdue"; summary: { state: "unpaid" | "partial" | "paid" } }) {
+  if (i.summary.state === "paid") return { label: "Paid", variant: "gold" as const };
+  if (i.dueState === "overdue") return { label: i.summary.state === "partial" ? "Overdue — partially paid" : "Overdue", variant: "destructive" as const };
+  if (i.summary.state === "partial") return { label: "Partially paid", variant: "outline" as const };
+  return { label: i.dueState === "grace" ? "Pending (grace period)" : "Pending", variant: "secondary" as const };
+}
 
 async function Billing() {
   const teacher = await requireRole("teacher", "/teacher/billing");
-  const [{ rows, unpaid, suspended, sessionsDue, sessionsNeedingReview }, config, students, courses] = await Promise.all([
+  const [{ rows, unpaid, suspended, sessionsDue, sessionsNeedingReview, paymentsToReview }, config, students, courses] = await Promise.all([
     listBillingAccounts(teacher),
     getClassBillingConfig(),
     listStudentOptions(teacher),
@@ -46,7 +52,7 @@ async function Billing() {
 
       {!config.saved && (
         <p className="rounded-xl border border-gold/40 bg-gold-soft/50 px-4 py-3 text-sm text-brown">
-          Using the confirmed default rates: batch ₹400 per class per student (first class paid at enrolment, then four-week cycles), individual sessions ₹750 each.
+          Using the confirmed default rates: batch ₹400 per class per student, individual ₹750 per session — invoiced at the end of each calendar month (initial enrolment payment deducted once).
         </p>
       )}
 
@@ -91,18 +97,55 @@ async function Billing() {
                   </Link>{" "}
                   · {i.courseTitle} · {i.label}
                   <span className="block text-xs text-muted-foreground">
-                    {i.kind === "cycle" ? `Due ${formatDateTime(i.deadlineAt)}` : `Due ${formatDate(i.dueAt)} · payment deadline ${formatDateTime(i.deadlineAt)}`}
+                    {i.kind === "legacy_monthly" ? `Due ${formatDate(i.dueAt)} · payment deadline ${formatDateTime(i.deadlineAt)}` : `Payment deadline ${formatDateTime(i.deadlineAt)}`}
+                    {i.kind !== "month" ? " · earlier billing" : ""}
                   </span>
                 </span>
-                <span className="flex items-center gap-2">
-                  <Badge variant={i.dueState === "overdue" ? "destructive" : i.dueState === "grace" ? "outline" : "secondary"}>{DUE_LABEL[i.dueState]}</Badge>
-                  <span className="font-semibold text-maroon">{formatMoney(i.summary.balanceMinor)}</span>
+                <span className="flex flex-wrap items-center justify-end gap-2">
+                  <Badge variant={invoiceStatus(i).variant}>{invoiceStatus(i).label}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {i.mode === "batch" ? "Batch" : "Individual"} · paid {formatMoney(i.summary.paidMinor)} of {formatMoney(i.summary.totalDueMinor)}
+                  </span>
+                  <span className="font-semibold text-maroon">{formatMoney(i.summary.balanceMinor)} outstanding</span>
                 </span>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {paymentsToReview.length > 0 && (
+        <section aria-labelledby="payments-review" className="flex flex-col gap-3">
+          <h2 id="payments-review" className="type-h3">Payments under review or failed</h2>
+          <p className="text-sm text-muted-foreground">
+            Online payments are recorded only after server-side verification and are never marked successful by hand. These need a teacher decision (refund
+            or adjustment) or were recorded as not received.
+          </p>
+          <ul className="divide-y divide-border rounded-2xl border border-gold/40 bg-gold-soft/30 text-sm">
+            {paymentsToReview.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+                <span>
+                  {p.accountId ? (
+                    <Link href={`/teacher/billing/${p.accountId}`} className="font-medium text-brown hover:text-maroon hover:underline">
+                      {formatMoney(p.amountMinor)} · {paymentPurposeLabel(p) ?? "Payment"}
+                    </Link>
+                  ) : (
+                    <span className="font-medium text-brown">
+                      {formatMoney(p.amountMinor)} · {paymentPurposeLabel(p) ?? "Payment"}
+                    </span>
+                  )}
+                  <span className="block text-xs text-muted-foreground">
+                    {formatDate(p.paidAt)}
+                    {p.reference ? ` · Ref ${p.reference}` : ""}
+                    {p.notes ? ` · ${p.notes}` : ""}
+                  </span>
+                </span>
+                <Badge variant={p.status === "failed" ? "destructive" : "outline"}>{p.status === "failed" ? "Failed" : "Under review"}</Badge>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {sessionsNeedingReview.length > 0 && (
         <section aria-labelledby="review" className="flex flex-col gap-3">
@@ -134,7 +177,7 @@ async function Billing() {
                 <thead className="bg-cream-deep/60 text-xs tracking-wide text-brown-muted uppercase">
                   <tr>
                     <th scope="col" className="px-4 py-3 font-semibold">Student · Course</th>
-                    <th scope="col" className="px-4 py-3 font-semibold">Type</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Type · agreed rate</th>
                     <th scope="col" className="px-4 py-3 font-semibold">Not yet invoiced</th>
                     <th scope="col" className="px-4 py-3 font-semibold">Advance</th>
                     <th scope="col" className="px-4 py-3 text-right font-semibold">Outstanding</th>
@@ -153,9 +196,15 @@ async function Billing() {
                           {a.suspension.active ? " · suspended" : ""}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-brown">{BILLING_MODE_LABELS[a.mode]}</td>
                       <td className="px-4 py-3 text-brown">
-                        {a.mode === "batch" ? `${a.uninvoicedCount} class(es) · ${formatMoney(a.uninvoicedMinor)}` : `${formatMoney(a.sessionsDueMinor)} sessions due`}
+                        {BILLING_MODE_LABELS[a.mode]}
+                        <span className="block text-xs text-muted-foreground">
+                          {a.agreedRateMinor !== null ? `${formatMoney(a.agreedRateMinor)} per ${a.mode === "batch" ? "class" : "session"}` : "Academy rates (earlier account)"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-brown">
+                        {a.uninvoicedCount} {a.mode === "batch" ? "class(es)" : "session(s)"} · {formatMoney(a.uninvoicedMinor)}
+                        {a.sessionsDueMinor > 0 && <span className="block text-xs text-muted-foreground">+ {formatMoney(a.sessionsDueMinor)} earlier per-session charges due</span>}
                       </td>
                       <td className="px-4 py-3 text-brown">{ADVANCE_STATUS_LABELS[a.advance.status]}</td>
                       <td className="px-4 py-3 text-right font-semibold text-brown">{formatMoney(a.outstandingMinor + a.sessionsDueMinor)}</td>
@@ -176,7 +225,7 @@ export default function TeacherBillingPage() {
     <>
       <TeacherPageHeader
         title="Billing"
-        description="Batch classes: first class paid at enrolment, then invoiced per four-week cycle (₹400 per class per student). Individual sessions are paid per session (₹750). All dates are IST."
+        description="Calendar-month billing: batch ₹400 per class per student, individual ₹750 per session. Invoices are generated on the last day of each month and due within 3 days; the initial enrolment payment is deducted once. All dates are IST."
       />
       <Suspense fallback={<LoadingState label="Loading billing…" />}>
         <Billing />

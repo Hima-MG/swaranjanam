@@ -9,15 +9,18 @@ import { isValidId } from "@/lib/lms/validation";
 import { GatewayConfigError } from "@/lib/payments/razorpay";
 
 // Student online payments (Razorpay TEST MODE) for the first-class payment,
-// four-weekly batch invoices and individual sessions. The student is always the signed-in user; the amount is
+// monthly invoices and (earlier) per-session charges. The student is always the signed-in user; the amount is
 // always calculated on the server.
 
 export async function startOnlinePayment(kind: unknown, id: unknown): Promise<ActionResult<CheckoutOrder>> {
   return runAction("startOnlinePayment", async () => {
     const user = await requireActionUser("student");
-    if ((kind !== "advance" && kind !== "invoice" && kind !== "session") || !isValidId(id)) throw new AccessError("That payment could not be found.");
+    if ((kind !== "advance" && kind !== "invoice" && kind !== "session" && kind !== "registration") || !isValidId(id)) throw new AccessError("That payment could not be found.");
     try {
-      return await createOrderForStudent(user, kind === "advance" ? { kind, accountId: id } : kind === "session" ? { kind, chargeId: id } : { kind, invoiceId: id });
+      return await createOrderForStudent(
+        user,
+        kind === "advance" ? { kind, accountId: id } : kind === "session" ? { kind, chargeId: id } : kind === "registration" ? { kind, registrationId: id } : { kind, invoiceId: id },
+      );
     } catch (error) {
       if (error instanceof GatewayConfigError) throw new AccessError("Online payment is not available right now. Please pay the academy directly.");
       throw error;

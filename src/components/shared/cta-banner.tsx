@@ -13,7 +13,7 @@ interface CtaBannerProps {
 
 export function CtaBanner({
   title = "Begin your musical journey today",
-  description = "Choose an open course, sign in or create a free account and send your enrolment request — nothing is charged until you are placed in a batch.",
+  description = "Choose an open course, add the learner's details and pay for your first class to confirm your place. That payment is deducted on your first monthly invoice.",
 }: CtaBannerProps) {
   return (
     <section className="py-16 sm:py-24">

@@ -1,27 +1,31 @@
-import { ArrowLeft, CheckCircle2, Clock, Info } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, Info, Pencil } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
-import { EnrolmentRequestForm } from "@/components/lms/student/enrolment-request-form";
 import { PayOnlineButton } from "@/components/lms/student/pay-online-button";
+import { saveMyRegistration } from "@/app/(account)/dashboard/registration-actions";
+import { RegistrationForm } from "@/components/lms/student/registration-form";
+import { RegistrationSummaryRows } from "@/components/lms/student/registration-summary";
 import { PageHero } from "@/components/shared/page-hero";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Section } from "@/components/ui/section";
 import { requireRole } from "@/lib/auth/session";
-import { FEE_TERMS } from "@/lib/catalog/public-pricing";
 import { getPublishedCourseBySlug } from "@/lib/catalog/server";
 import { formatMoney } from "@/lib/format";
+import { courseEnrolmentChoices } from "@/lib/lms/enrolment-options";
 import { formatDate } from "@/lib/format-date";
-import { ADVANCE_STATUS_LABELS } from "@/lib/lms/class-billing";
-import { ENROLMENT_MODE_LABELS, ENROLMENT_REQUEST_STATUS_LABELS, getOwnEnrolmentState } from "@/lib/lms/server/enrolment";
+import { registrationStatusLabel, WEEKDAY_LABELS, WEEKDAYS } from "@/lib/lms/registration";
+import { claimGuestRegistrations } from "@/lib/lms/server/guest-enrolment";
+import { getOwnRegistration } from "@/lib/lms/server/registrations";
 import { onlinePaymentsEnabled } from "@/lib/payments/razorpay";
 
 export const metadata: Metadata = { title: "Enrol" };
 
 type Params = PageProps<"/dashboard/enrol/[slug]">["params"];
+type SearchParams = PageProps<"/dashboard/enrol/[slug]">["searchParams"];
 
 function Notice({ tone = "info", children }: { tone?: "info" | "success" | "warning"; children: React.ReactNode }) {
   const Icon = tone === "success" ? CheckCircle2 : tone === "warning" ? Clock : Info;
@@ -35,20 +39,31 @@ function Notice({ tone = "info", children }: { tone?: "info" | "success" | "warn
   );
 }
 
-async function Enrol({ params }: { params: Params }) {
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1 border-b border-border py-2.5 last:border-0 sm:grid-cols-[12rem_1fr]">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-medium text-brown">{children}</dd>
+    </div>
+  );
+}
+
+async function Enrol({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const { slug } = await params;
+  const { edit } = await searchParams;
   // Sign-in (or registration) is required; login returns the student here.
   const user = await requireRole("student", `/dashboard/enrol/${encodeURIComponent(slug)}`);
+  await claimGuestRegistrations(user);
   const result = await getPublishedCourseBySlug(slug);
   if (!result.ok) return <Notice tone="warning">Courses could not be loaded right now. Please refresh the page in a minute.</Notice>;
   const course = result.data;
   if (!course) notFound();
 
-  if (course.availability !== "open" || !course.fee) {
+  if (course.availability !== "open" || courseEnrolmentChoices(course).length === 0) {
     return (
       <Notice>
         <p>
-          <strong>{course.title}</strong> is coming soon and is not yet open for enrolment. Fees will be announced when it opens.
+          <strong>{course.title}</strong> {course.availability === "closed" ? "is closed for new enrolments." : "is coming soon and is not yet open for enrolment."}
         </p>
         <Link href="/#courses" className="font-semibold text-maroon hover:underline">
           See the courses open now
@@ -57,132 +72,137 @@ async function Enrol({ params }: { params: Params }) {
     );
   }
 
-  const fee = course.fee;
-  const state = await getOwnEnrolmentState(user, course);
-  const payOnline = onlinePaymentsEnabled();
-  const batchAdvance = formatMoney(state.batch?.advance.amountMinor || fee.batchAdvanceMinor);
+  const registration = await getOwnRegistration(user, course.slug);
+  const back = (
+    <Link href={`/courses/${course.slug}`} className="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-maroon">
+      <ArrowLeft className="size-4" aria-hidden="true" />
+      Back to {course.title}
+    </Link>
+  );
 
-  let next: React.ReactNode;
-  if (state.batch?.status === "active") {
-    const advance = state.batch.advance;
-    next =
-      advance.status === "awaiting" ? (
-        <Notice>
-          <p>
-            You have a place in a batch for <strong>{course.title}</strong>. The last step is the non-refundable first-class payment of{" "}
-            <strong>{batchAdvance}</strong>. It pays for your first class, which is never invoiced again — it is not an extra fee. Your class link opens once it
-            is verified.
-          </p>
-          {payOnline ? (
-            <PayOnlineButton kind="advance" id={state.batch.id} label={`Pay ${batchAdvance} for your first class`} />
-          ) : (
-            <p className="text-muted-foreground">Online payment is not available yet. The academy will tell you how to pay the advance.</p>
-          )}
-          <p className="text-xs text-muted-foreground">Your payment is confirmed only after the academy&apos;s server has verified it with Razorpay.</p>
-        </Notice>
-      ) : (
-        <Notice tone="success">
-          <p>
-            You are enrolled in a batch for <strong>{course.title}</strong>. First-class payment: {ADVANCE_STATUS_LABELS[advance.status]}. Your four-weekly
-            invoices and receipts are on your billing page.
-          </p>
-          {state.batch.suspension.active && (
-            <p className="text-destructive">Access is paused because an invoice is unpaid after its payment deadline. It is restored once the payment is verified.</p>
-          )}
-          <Button asChild variant="outline" className="self-start">
-            <Link href="/dashboard/billing">Go to my fees</Link>
-          </Button>
-        </Notice>
-      );
-  } else if (state.individual?.status === "active") {
-    next = (
-      <Notice tone="success">
-        <p>
-          You are enrolled for individual classes in <strong>{course.title}</strong>. Each session ({formatMoney(fee.individualMinor)}) appears on your billing
-          page once it is scheduled, with its own Pay button.
-        </p>
-        <Button asChild variant="outline" className="self-start">
-          <Link href="/dashboard/billing">Go to my fees</Link>
-        </Button>
-      </Notice>
-    );
-  } else if (state.request?.status === "pending") {
-    next = (
-      <Notice>
-        <p>
-          Your request for <strong>{ENROLMENT_MODE_LABELS[state.request.mode].toLowerCase()}</strong> was sent
-          {state.request.createdAt ? ` on ${formatDate(state.request.createdAt)}` : ""}. {ENROLMENT_REQUEST_STATUS_LABELS.pending}: the academy will place
-          you {state.request.mode === "batch" ? "in a batch" : "with a teacher"} and open your billing account. Come back to this page to pay
-          {state.request.mode === "batch" ? ` the ${batchAdvance} first-class payment online.` : " for each session once it is scheduled."}
-        </p>
-        <p className="text-muted-foreground">Nothing has been charged.</p>
-      </Notice>
-    );
-  } else {
-    next = (
-      <div className="flex flex-col gap-4">
-        {state.request?.status === "declined" && (
-          <Notice tone="warning">
-            <p>Your earlier request was declined{state.request.resolvedNote ? `: ${state.request.resolvedNote}` : "."} You can send a new request below.</p>
-          </Notice>
-        )}
-        <EnrolmentRequestForm
+  // ---- Steps 1–2: class type and details (new, cancelled, or editing before payment) ----
+  const editable = !registration || registration.status === "cancelled" || (registration.status === "pending_payment" && edit === "1");
+  if (editable) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-8">
+        {back}
+        <RegistrationForm
+          save={saveMyRegistration}
+          reviewPath={`/dashboard/enrol/${course.slug}`}
+          defaultEmail={user.email ?? ""}
+          emailLocked={Boolean(user.email)}
           slug={course.slug}
-          options={[
-            {
-              mode: "batch",
-              title: "Batch class",
-              price: `${formatMoney(fee.batchMinor)} per session`,
-              detail: `Up to 5 students. Once you are placed in a batch you pay ${formatMoney(fee.batchAdvanceMinor)} online for your first class (non-refundable). After that you are invoiced every four weeks for the classes held, due before your next class.`,
-            },
-            {
-              mode: "individual",
-              title: "Individual class",
-              price: `${formatMoney(fee.individualMinor)} per session`,
-              detail: "One-to-one. Each session is paid separately once it is scheduled. No first-class payment and no four-weekly invoice.",
-            },
-          ]}
+          initial={registration && registration.status === "pending_payment" ? { type: registration.enrolmentType, details: registration.details } : null}
+          // Only the class types this course offers, at this course's own rates.
+          // Only the enrolment types this course offers, priced on the server again at save time.
+          options={courseEnrolmentChoices(course)}
+          fixedSchedule={Boolean(course.programme)}
         />
       </div>
     );
   }
 
+  const r = registration!;
+  const details = r.details;
+  const summary = (
+    <dl className="flex flex-col text-sm">
+      <Row label="Course">{r.courseTitle}</Row>
+      <RegistrationSummaryRows r={r} />
+      <Row label="Preferred days">{WEEKDAYS.filter((d) => details.preferredDays.includes(d)).map((d) => WEEKDAY_LABELS[d]).join(", ")}</Row>
+      <Row label="Preferred times (IST)">{details.preferredTimes.map((t) => `${t.start}–${t.end}`).join(", ")}</Row>
+    </dl>
+  );
+
+  // ---- Step 3: review and pay (also the retry after a failed or cancelled checkout) ----
+  if (r.status === "pending_payment") {
+    const payOnline = onlinePaymentsEnabled();
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+        {back}
+        <section aria-labelledby="review" className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft">
+          <h2 id="review" className="type-h3">
+            Review and pay
+          </h2>
+          {summary}
+          {r.kind === "special" ? (
+            <p className="text-sm text-muted-foreground">
+              This is the full programme fee, paid once. There is no first-class payment and no monthly invoice. Your registration is confirmed when the payment is verified.
+            </p>
+          ) : (
+          <p className="text-sm text-muted-foreground">
+            Your preferred days and times are requests, not a confirmed booking.{" "}
+            {r.mode === "batch"
+              ? `The ${formatMoney(r.initialAmountMinor)} pays for your first class and is deducted on your first monthly invoice — never charged twice; classes held are invoiced at the end of each calendar month, due within 3 days.`
+              : `The ${formatMoney(r.initialAmountMinor)} pays for your first individual session and is deducted on your first monthly invoice; sessions held are invoiced at the end of each calendar month, due within 3 days.`}{" "}
+            You never pay for a whole course upfront.
+          </p>
+          )}
+          {payOnline ? (
+            <PayOnlineButton kind="registration" id={r.id} label={`Pay ${formatMoney(r.initialAmountMinor)}`} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Online payment is not available yet. Your registration is saved; the academy will tell you how to pay.</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Your payment counts only after the academy&apos;s server has verified it with Razorpay. If a payment fails or you close the checkout, nothing is lost:
+            come back to this page and try again.
+          </p>
+          <Button asChild variant="outline" className="self-start">
+            <Link href={`/dashboard/enrol/${course.slug}?edit=1`}>
+              <Pencil data-icon="inline-start" />
+              Change class type or details
+            </Link>
+          </Button>
+        </section>
+      </div>
+    );
+  }
+
+  // ---- After the verified payment ----
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8">
-      <Link href={`/courses/${course.slug}`} className="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-maroon">
-        <ArrowLeft className="size-4" aria-hidden="true" />
-        Back to {course.title}
-      </Link>
-      <section aria-labelledby="fees" className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 shadow-soft">
-        <h2 id="fees" className="type-h3">
-          Fees and how payment works
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      {back}
+      <Notice tone="success">
+        <p className="font-semibold">{registrationStatusLabel(r.status, r.mode, r.kind)}</p>
+        {r.status === "paid" && (
+          <p>
+            Your payment of {formatMoney(r.initialAmountMinor)}
+            {r.paidAt ? ` was verified on ${formatDate(r.paidAt)}` : " is verified"}.{" "}
+            {r.kind === "special"
+              ? "Your programme registration is confirmed. The programme appears under My courses on your dashboard."
+              : r.mode === "batch"
+              ? "The academy will place you in a batch that suits your preferred days and times. Your class schedule appears on your dashboard once you are assigned."
+              : "The academy will confirm your session schedule. It appears on your dashboard once confirmed."}
+          </p>
+        )}
+        {r.status === "scheduled" && r.confirmedSchedule && <p>Your schedule: {r.confirmedSchedule}</p>}
+        {(r.status === "assigned" || r.status === "scheduled" || (r.kind === "special" && r.status === "paid")) && (
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/dashboard">My dashboard</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/dashboard/billing">My fees</Link>
+            </Button>
+          </div>
+        )}
+      </Notice>
+      <section aria-labelledby="registration" className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 shadow-soft">
+        <h2 id="registration" className="type-h3">
+          Your registration
         </h2>
-        <ul className="flex flex-col gap-1.5 text-sm text-brown">
-          <li>
-            <strong>Batch class:</strong> {formatMoney(fee.batchMinor)} per session, per student. Your first class ({formatMoney(fee.batchAdvanceMinor)},
-            non-refundable) is paid online when you are placed in a batch; later classes are invoiced every four weeks.
-          </li>
-          <li>
-            <strong>Individual class:</strong> {formatMoney(fee.individualMinor)} per session, each paid separately.
-          </li>
-          {FEE_TERMS.map((term) => (
-            <li key={term}>{term}</li>
-          ))}
-          <li>You never pay for a whole course upfront.</li>
-        </ul>
+        {summary}
       </section>
-      {next}
     </div>
   );
 }
 
-export default function EnrolPage({ params }: { params: Params }) {
+export default function EnrolPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   return (
     <>
-      <PageHero eyebrow="Enrol" title="Join a course" description="Choose batch or individual classes. Fees are per session; nothing is charged until the academy has placed you." />
+      <PageHero eyebrow="Enrol" title="Join a course" description="Choose batch or individual classes, tell us about the learner, then pay for the first class to confirm your place." />
       <Section spacing="sm">
         <Suspense fallback={<LoadingState label="Loading…" />}>
-          <Enrol params={params} />
+          <Enrol params={params} searchParams={searchParams} />
         </Suspense>
       </Section>
     </>

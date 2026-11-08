@@ -115,6 +115,8 @@ export interface CatalogInput {
   featured: boolean;
   outcomes: string[];
   outcomesMl: string[];
+  /** Only when the form sends it. */
+  prerequisites?: string[];
   /** Public enrolment status; null = not listed publicly. */
   availability: CourseAvailability | null;
   /** Requested slug; empty means "keep the current one". */
@@ -153,6 +155,9 @@ export function parseCatalogInput(input: Record<string, unknown>): { value: Cata
   const originalPrice = sendsPrices ? rupees(input.originalPrice) : null;
   const outcomes = lines(input.outcomes);
   const outcomesMl = lines(input.outcomesMl);
+  // Sent by the catalogue form; other callers leave stored prerequisites untouched.
+  const sendsPrerequisites = "prerequisites" in input;
+  const prerequisites = lines(input.prerequisites);
   const slug = cleanText(input.slug, LIMITS.slug).toLowerCase();
 
   if (level === undefined) errors.level = "Choose a level from the list.";
@@ -168,6 +173,7 @@ export function parseCatalogInput(input: Record<string, unknown>): { value: Cata
   if (originalPrice != null && price == null) errors.originalPrice = "Set the current fee first.";
   if (outcomes.length > CATALOG_LIMITS.outcomes) errors.outcomes = `Use at most ${CATALOG_LIMITS.outcomes} outcomes.`;
   if (outcomesMl.length > CATALOG_LIMITS.outcomes) errors.outcomesMl = `Use at most ${CATALOG_LIMITS.outcomes} outcomes.`;
+  if (prerequisites.length > CATALOG_LIMITS.outcomes) errors.prerequisites = `Use at most ${CATALOG_LIMITS.outcomes} prerequisites.`;
   if (slug && !SLUG_PATTERN.test(slug)) {
     errors.slug = "Use lowercase letters, numbers and single hyphens only (e.g. sarali-varisai).";
   }
@@ -187,6 +193,7 @@ export function parseCatalogInput(input: Record<string, unknown>): { value: Cata
       featured: input.featured === true || input.featured === "on",
       outcomes: outcomes.slice(0, CATALOG_LIMITS.outcomes),
       outcomesMl: outcomesMl.slice(0, CATALOG_LIMITS.outcomes),
+      ...(sendsPrerequisites ? { prerequisites: prerequisites.slice(0, CATALOG_LIMITS.outcomes) } : {}),
       availability: availability ?? null,
       slug,
     },

@@ -14,7 +14,7 @@ import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PACKAGE_TYPE_LABELS } from "@/lib/lms/billing";
-import { ADVANCE_STATUS_LABELS, BATCH_BLOCK_MESSAGES, BILLING_MODE_LABELS, CLASS_OUTCOME_LABELS, SESSION_CHARGE_LABELS } from "@/lib/lms/class-billing";
+import { ADVANCE_STATUS_LABELS, CLASS_BLOCK_MESSAGES, BILLING_MODE_LABELS, CLASS_OUTCOME_LABELS, SESSION_CHARGE_LABELS } from "@/lib/lms/class-billing";
 import { getOwnClassBilling } from "@/lib/lms/server/class-billing";
 import { onlinePaymentsEnabled } from "@/lib/payments/razorpay";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
@@ -61,6 +61,12 @@ async function StudentBilling() {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <h3 className="font-semibold text-brown">{a.courseTitle}</h3>
+                    {a.learnerCount > 1 && (
+                      <p className="text-xs text-brown">
+                        Learn Together: {a.learnerNames.join(" & ")}
+                        {a.perLearnerRateMinor ? ` · ${formatMoney(a.perLearnerRateMinor)} per person` : ""}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {BILLING_MODE_LABELS[a.mode]}
                       {a.status === "closed" ? " · closed" : ""}
@@ -68,28 +74,31 @@ async function StudentBilling() {
                   </div>
                   {a.suspended && <Badge variant="destructive">Access paused</Badge>}
                 </div>
-                {a.mode === "batch" && (
-                  <>
-                    <p className="text-brown">
-                      First-class payment{a.advance.amountMinor > 0 ? ` (${formatMoney(a.advance.amountMinor)}, non-refundable)` : ""}: {ADVANCE_STATUS_LABELS[a.advance.status]}
-                    </p>
-                    {a.blocked && <p className="text-xs text-destructive">{BATCH_BLOCK_MESSAGES[a.blocked]}</p>}
-                    {a.advance.status === "awaiting" && payOnline && (
-                      <PayOnlineButton kind="advance" id={a.id} label={`Pay ${formatMoney(a.advance.amountMinor)} for your first class`} />
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      After your first class you are invoiced every four weeks for the classes actually held (attended and missed classes count; classes cancelled
-                      by the academy do not). Each invoice is due at the end of its fourth week — pay it before your next class.
-                    </p>
-                  </>
+                {a.advance.status !== "not_required" && (
+                  <p className="text-brown">
+                    Initial enrolment payment{a.advance.amountMinor > 0 ? ` (${formatMoney(a.advance.amountMinor)}, non-refundable)` : ""}:{" "}
+                    {ADVANCE_STATUS_LABELS[a.advance.status]}
+                  </p>
                 )}
+                {a.blocked && <p className="text-xs text-destructive">{CLASS_BLOCK_MESSAGES[a.blocked]}</p>}
+                {a.advance.status === "awaiting" && payOnline && (
+                  <PayOnlineButton kind="advance" id={a.id} label={`Pay ${formatMoney(a.advance.amountMinor)} for your first class`} />
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {a.mode === "batch"
+                    ? "Invoiced at the end of each calendar month for the classes actually held (attended and missed classes count; classes cancelled by the academy do not)."
+                    : "Invoiced at the end of each calendar month for the sessions held. A session you cancel is still billed and you receive its recording; a session the academy cancels is not billed."}{" "}
+                  Your initial payment is deducted on the invoice that lists your first {a.mode === "batch" ? "class" : "session"}. Pay within 3 days of the
+                  invoice date.
+                </p>
               </li>
             ))}
           </ul>
 
           {classBilling.uninvoiced.map((u) => (
-            <p key={u.courseTitle} className="text-sm text-muted-foreground">
-              {u.courseTitle}: {u.count} class{u.count === 1 ? "" : "es"} so far, {formatMoney(u.amountMinor)} — to be invoiced at the end of the current four-week cycle.
+            <p key={`${u.courseTitle}-${u.mode}`} className="text-sm text-muted-foreground">
+              {u.courseTitle}: {u.count} {u.mode === "batch" ? `class${u.count === 1 ? "" : "es"}` : `session${u.count === 1 ? "" : "s"}`} so far,{" "}
+              {formatMoney(u.amountMinor)} — on your next monthly invoice (last day of the month).
             </p>
           ))}
 
@@ -104,29 +113,38 @@ async function StudentBilling() {
                     <span className="flex items-center gap-2">
                       {i.summary.balanceMinor > 0 && i.dueState === "overdue" && <Badge variant="destructive">Overdue</Badge>}
                       {i.summary.balanceMinor > 0 && i.dueState === "grace" && <Badge variant="outline">Grace period</Badge>}
+                      {i.kind !== "month" && <Badge variant="secondary">Earlier billing</Badge>}
                       <Badge variant={i.summary.state === "paid" ? "gold" : i.summary.state === "partial" ? "outline" : "secondary"}>
                         {i.summary.state === "paid" ? "Paid" : i.summary.state === "partial" ? "Partly paid" : "Unpaid"}
                       </Badge>
                     </span>
                   </div>
+                  {i.invoiceDate && <p className="text-xs text-muted-foreground">Invoice date {formatDate(i.invoiceDate)}</p>}
+                  {i.learnerCount > 1 && (
+                    <p className="text-xs text-brown">
+                      Learn Together: {i.learnerNames.join(" & ")}
+                      {i.perLearnerRateMinor ? ` · ${formatMoney(i.perLearnerRateMinor)} per person × ${i.learnerCount} = ${formatMoney(i.perLearnerRateMinor * i.learnerCount)} per session` : ""}
+                    </p>
+                  )}
                   <ul className="text-muted-foreground">
                     {i.lines.map((l) => (
                       <li key={l.classId}>
                         {l.date} · {l.title} · {CLASS_OUTCOME_LABELS[l.outcome]} · {formatMoney(l.rateMinor)}
+                        {l.coveredByInitialPayment ? " · paid by your initial enrolment payment" : ""}
                       </li>
                     ))}
                   </ul>
                   <p className="text-brown">
-                    {i.lines.length} class{i.lines.length === 1 ? "" : "es"}: {formatMoney(i.subtotalMinor)}
-                    {i.advanceAppliedMinor > 0 ? ` − ${formatMoney(i.advanceAppliedMinor)} enrolment advance (monthly billing)` : ""}
+                    {i.lines.length} session{i.lines.length === 1 ? "" : "s"}: {formatMoney(i.subtotalMinor)}
+                    {i.advanceAppliedMinor > 0 ? ` − ${formatMoney(i.advanceAppliedMinor)} initial enrolment payment` : ""}
                     {i.summary.creditsMinor > 0 || i.summary.debitsMinor > 0 ? " (with adjustments)" : ""} · total {formatMoney(i.summary.totalDueMinor)} · paid {formatMoney(i.summary.paidMinor)} ·{" "}
                     <span className="font-semibold">balance {formatMoney(Math.max(i.summary.balanceMinor, 0))}</span>
                   </p>
                   {i.summary.balanceMinor > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      {i.kind === "cycle"
-                        ? `Due by ${formatDateTime(i.deadlineAt)} (IST). Unpaid after that, class links and lessons pause until the payment is verified.`
-                        : `Due ${formatDate(i.dueAt)} · please pay by ${formatDateTime(i.deadlineAt)} (IST) to avoid a pause in access.`}
+                      {i.kind === "legacy_monthly"
+                        ? `Due ${formatDate(i.dueAt)} · please pay by ${formatDateTime(i.deadlineAt)} (IST) to avoid a pause in access.`
+                        : `Pay by ${formatDateTime(i.deadlineAt)} (IST). Unpaid after that, class links and lessons pause until the payment is verified.`}
                     </p>
                   )}
                   {i.summary.pendingMinor > 0 && <p className="text-xs text-muted-foreground">{formatMoney(i.summary.pendingMinor)} awaiting verification</p>}
@@ -138,7 +156,7 @@ async function StudentBilling() {
 
           {classBilling.sessions.length > 0 && (
             <div className="flex flex-col gap-2">
-              <h3 className="font-semibold text-brown">Individual sessions</h3>
+              <h3 className="font-semibold text-brown">Individual sessions paid separately (earlier method)</h3>
               <ul className="divide-y divide-border rounded-2xl border border-border bg-card text-sm shadow-soft">
                 {classBilling.sessions.map((s) => (
                   <li key={s.id} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -159,7 +177,7 @@ async function StudentBilling() {
                 ))}
               </ul>
               <p className="text-xs text-muted-foreground">
-                Each session is paid separately. Cancel at least 24 hours before the start for no charge; later cancellations remain payable.
+                These sessions were scheduled before monthly invoicing and are paid one at a time; they never appear on a monthly invoice. A session you cancel stays payable (you receive its recording); a session the academy cancels is not charged.
               </p>
             </div>
           )}
@@ -242,7 +260,7 @@ async function StudentBilling() {
                     {" "}· {formatDate(p.paidAt)} · {PAYMENT_METHOD_LABELS[p.method as PaymentMethod] ?? "Other"}
                     {p.referenceMasked ? ` · Ref ${p.referenceMasked}` : ""}
                   </span>
-                  {p.packageTitle && <span className="block text-xs text-muted-foreground">{p.packageTitle}</span>}
+                  {(p.forLabel ?? p.packageTitle) && <span className="block text-xs text-muted-foreground">{p.forLabel ?? p.packageTitle}</span>}
                 </span>
                 <span className="flex flex-wrap items-center gap-2">
                   <Badge variant={p.status === "paid" && p.verified ? "gold" : p.status === "pending" ? "outline" : "secondary"}>

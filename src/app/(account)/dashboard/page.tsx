@@ -22,7 +22,11 @@ import { getOwnBilling } from "@/lib/lms/server/billing";
 import { listOwnClasses } from "@/lib/lms/server/classes";
 import { TestimonialPanel } from "@/components/lms/student/testimonial-panel";
 import { UpcomingClasses } from "@/components/lms/student/upcoming-classes";
+import { VerifyEmailButton } from "@/components/lms/student/verify-email-button";
 import { getOwnTestimonials } from "@/lib/lms/server/testimonials";
+import { ENROLMENT_TYPE_LABELS, learnerNamesLabel, registrationStatusLabel } from "@/lib/lms/registration";
+import { claimGuestRegistrations } from "@/lib/lms/server/guest-enrolment";
+import { listOwnRegistrations } from "@/lib/lms/server/registrations";
 import { formatDate } from "@/lib/format-date";
 
 export const metadata: Metadata = { title: "My Dashboard" };
@@ -30,7 +34,9 @@ export const metadata: Metadata = { title: "My Dashboard" };
 async function StudentDashboard() {
   // Server-side guard: signed-out visitors go to /login, teachers to /teacher.
   const user = await requireRole("student", "/dashboard");
-  const [profile, overview, announcements, liveClasses, billing, ownTestimonials, batches, classBilling] = await Promise.all([
+  // Paid guest registrations made with this (verified) email are linked to the account now.
+  await claimGuestRegistrations(user);
+  const [profile, overview, announcements, liveClasses, billing, ownTestimonials, batches, classBilling, registrations] = await Promise.all([
     getUserProfile(user.uid),
     getStudentOverview(user),
     listAnnouncementsForStudent(user),
@@ -42,7 +48,10 @@ async function StudentDashboard() {
     // Only batches the student is an ACTIVE member of (server-checked).
     getOwnBatches(user),
     getOwnClassBilling(user),
+    // Own website registrations only (bound to user.uid in the data layer).
+    listOwnRegistrations(user),
   ]);
+  const openRegistrations = registrations.filter((r) => r.status !== "cancelled");
   // In-app fee reminders (no email/WhatsApp provider is configured).
   const unpaidInvoices = classBilling.invoices.filter((i) => i.summary.balanceMinor > 0);
   const sessionsDue = classBilling.sessions.filter((s) => s.status === "due");
@@ -81,6 +90,14 @@ async function StudentDashboard() {
           )}
         </div>
 
+        {user.emailVerified === false && (
+          <section aria-label="Verify your email" className="flex flex-col gap-2 rounded-2xl border border-gold/40 bg-gold-soft/40 p-5 text-sm text-brown">
+            <p className="font-semibold">Please verify your email address</p>
+            <p>Verifying it keeps your account secure and links any course you paid for before signing in.</p>
+            <VerifyEmailButton />
+          </section>
+        )}
+
         {(paused || unpaidInvoices.length > 0 || sessionsDue.length > 0) && (
           <section
             aria-label="Fee reminder"
@@ -107,6 +124,44 @@ async function StudentDashboard() {
             <Link href="/dashboard/billing" className="self-start font-semibold underline">
               View and pay
             </Link>
+          </section>
+        )}
+
+        {openRegistrations.length > 0 && (
+          <section aria-labelledby="my-enrolments" className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 shadow-soft">
+            <h2 id="my-enrolments" className="type-h3">
+              My enrolments
+            </h2>
+            <ul className="flex flex-col divide-y divide-border">
+              {openRegistrations.map((r) => {
+                const batch = r.batchId ? batches.find((b) => b.id === r.batchId) : undefined;
+                return (
+                  <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-brown">
+                        {r.courseTitle} · {r.kind === "special" ? "Special Programme" : ENROLMENT_TYPE_LABELS[r.enrolmentType]}
+                        {r.learnerCount > 1 ? ` · ${learnerNamesLabel(r.details.learners.map((l) => l.fullName))}` : ""}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {r.kind === "special"
+                          ? `Programme fee ${formatMoney(r.initialAmountMinor)} (full payment) · ${r.status === "paid" ? "Paid" : "Not paid yet"}`
+                          : `Regular Academy Course · agreed rate ${formatMoney(r.rateMinor)} per ${r.mode === "batch" ? "class" : "session"}`}
+                      </p>
+                      <p className={r.status === "pending_payment" ? "text-destructive" : "text-muted-foreground"}>{registrationStatusLabel(r.status, r.mode, r.kind)}</p>
+                      {batch && (
+                        <p className="text-brown">
+                          {batch.name}: {batch.schedule}
+                        </p>
+                      )}
+                      {r.status === "scheduled" && r.confirmedSchedule && <p className="text-brown">Schedule: {r.confirmedSchedule}</p>}
+                    </div>
+                    <Button asChild size="sm" variant={r.status === "pending_payment" ? "default" : "outline"}>
+                      <Link href={`/dashboard/enrol/${r.courseSlug}${r.studentId !== user.uid ? `?learner=${r.studentId}` : ""}`}>{r.status === "pending_payment" ? "Review and pay" : "Details"}</Link>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
           </section>
         )}
 
@@ -188,7 +243,7 @@ async function StudentDashboard() {
                   : "You are not enrolled in any courses yet. Once your teacher enrols you, your lessons and practice material will appear here."}
               </p>
               <Button asChild variant="outline">
-                <Link href="/courses">Browse Courses</Link>
+                <Link href="/#courses">Browse Courses</Link>
               </Button>
             </div>
           ) : (

@@ -15,7 +15,7 @@ rules_version = '2';
 //   announcements/{autoId}               server only; students see theirs via the app
 //   liveClasses/{autoId}                 server only; students see their own via the app
 //   billingAccounts/{ba_…}               server only; read by the rules to pause access while suspended
-//   enrolmentRequests/{uid}_{slug}       server only (website enrolment requests); catch-all deny
+//   registrations/{uid}_{slug}           server only (website registrations: learner details); catch-all deny
 //   auditLogs/{autoId}                   teacher-only (server); no client access
 //   testimonials/{autoId}                server only; public site shows approved + consented
 //                                        ones through the app. Covered by the catch-all deny.

@@ -1,4 +1,6 @@
+import type { ProgrammeInfo } from "@/lib/lms/programme";
 import type { CourseAvailability, CourseCategory, CourseFormat, CourseLevel, CourseTag } from "@/types/course";
+import type { CourseScheduleInfo } from "@/lib/lms/course-pricing";
 
 // LMS data model, shared by server and client code. Contains no secrets.
 //
@@ -110,6 +112,8 @@ export interface CourseCatalogFields {
   featured: boolean;
   outcomes: string[];
   outcomesMl: string[];
+  /** What learners should already know (shown publicly). */
+  prerequisites: string[];
   /** Public enrolment status; null = not reviewed, so not listed on the public website. */
   availability: CourseAvailability | null;
 }
@@ -125,6 +129,15 @@ export interface CourseRecord extends CourseCatalogFields {
   thumbnailPublicId: string | null;
   status: CourseStatus;
   teacherIds: string[];
+  /**
+   * Course-specific pricing as saved by a teacher (raw; read it through
+   * effectiveCoursePricing). Null for a course saved before course pricing existed.
+   */
+  storedPricing: Record<string, unknown> | null;
+  /** General teaching availability (not confirmed student schedules). */
+  scheduleInfo: CourseScheduleInfo;
+  /** Special Programme details; null = Regular Academy Course (older courses). */
+  programme: ProgrammeInfo | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -246,11 +259,13 @@ export interface PaymentRecord {
   /** Package payments only. */
   packageId: string | null;
   /** Class-based billing: what the payment is for, and the account/invoice it belongs to. */
-  purpose: "advance" | "invoice" | "session" | null;
+  purpose: "advance" | "invoice" | "session" | "registration" | null;
   accountId: string | null;
   invoiceId: string | null;
   /** Individual session charge this payment is for (sessionCharges/{id}). */
   sessionChargeId: string | null;
+  /** Website registration whose initial payment this is. */
+  registrationId: string | null;
   /** Everyone who may see this payment (package learners, or the student). */
   learnerIds: string[];
   /** Who paid, when not the learner (e.g. a parent). */
@@ -383,7 +398,7 @@ export interface AuditEntry {
     | "batch"
     | "billingAccount"
     | "invoice"
-    | "enrolmentRequest";
+    | "registration";
   targetId: string;
   summary: string;
   at: string | null;

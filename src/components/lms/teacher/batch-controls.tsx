@@ -14,6 +14,7 @@ import { Spinner } from "@/components/ui/loading-state";
 import { Modal } from "@/components/ui/modal";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { WEEKDAY_LABELS, WEEKDAYS, type WeeklySchedule } from "@/lib/lms/registration";
 import type { ActionResult } from "@/lib/lms/types";
 
 export function Field({ id, label, error, hint, children }: { id: string; label: string; error?: string; hint?: string; children: React.ReactNode }) {
@@ -107,6 +108,8 @@ export interface BatchFormValues {
   courseId: string;
   teacherId: string;
   schedule: string;
+  /** Structured days/times; null for an older batch with only a text schedule (set them when editing). */
+  weekly: WeeklySchedule | null;
   meetUrl: string | null;
   capacity: number;
   status: "active" | "archived";
@@ -161,7 +164,9 @@ export function BatchFormDialog({
             name: d.get("name"),
             courseId: d.get("courseId"),
             teacherId: d.get("teacherId"),
-            schedule: d.get("schedule"),
+            days: d.getAll("days"),
+            startTime: d.get("startTime"),
+            endTime: d.get("endTime"),
             meetUrl: d.get("meetUrl"),
             capacity: d.get("capacity"),
             status: d.get("status") ?? "active",
@@ -201,9 +206,27 @@ export function BatchFormDialog({
               ))}
             </NativeSelect>
           </Field>
-          <Field id="batch-schedule" label="Schedule" error={e.schedule} hint="Shown to members, e.g. Saturdays, 7–8 PM IST.">
-            <Input id="batch-schedule" name="schedule" defaultValue={existing?.schedule} maxLength={120} required />
-          </Field>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-sm font-medium text-brown">Class days</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {WEEKDAYS.map((day) => (
+                <label key={day} className="flex items-center gap-2 text-sm text-brown">
+                  <input type="checkbox" name="days" value={day} defaultChecked={existing?.weekly?.days.includes(day)} className="size-4 accent-maroon" />
+                  {WEEKDAY_LABELS[day]}
+                </label>
+              ))}
+            </div>
+            {e.days && <p className="text-xs text-destructive">{e.days}</p>}
+            {existing && !existing.weekly && <p className="text-xs text-muted-foreground">Previous schedule text: {existing.schedule}</p>}
+          </fieldset>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id="batch-start" label="Start time (IST)" error={e.startTime}>
+              <Input id="batch-start" name="startTime" type="time" defaultValue={existing?.weekly?.start ?? ""} required />
+            </Field>
+            <Field id="batch-end" label="End time (IST)" error={e.endTime}>
+              <Input id="batch-end" name="endTime" type="time" defaultValue={existing?.weekly?.end ?? ""} required />
+            </Field>
+          </div>
           <Field id="batch-meet" label="Google Meet link" error={e.meetUrl} hint="Shared by every class of this batch. Changing it updates upcoming classes.">
             <Input id="batch-meet" name="meetUrl" type="url" defaultValue={existing?.meetUrl ?? ""} placeholder="https://meet.google.com/…" autoComplete="off" />
           </Field>
@@ -211,14 +234,12 @@ export function BatchFormDialog({
             <Field id="batch-capacity" label={`Capacity (max ${maxCapacity})`} error={e.capacity}>
               <Input id="batch-capacity" name="capacity" inputMode="numeric" defaultValue={existing?.capacity ?? maxCapacity} />
             </Field>
-            {existing && (
-              <Field id="batch-status" label="Status">
-                <NativeSelect id="batch-status" name="status" defaultValue={existing.status}>
-                  <option value="active">Active</option>
-                  <option value="archived">Archived</option>
-                </NativeSelect>
-              </Field>
-            )}
+            <Field id="batch-status" label="Status">
+              <NativeSelect id="batch-status" name="status" defaultValue={existing?.status === "archived" ? "inactive" : "active"}>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </NativeSelect>
+            </Field>
           </div>
         </fieldset>
         {error && <FormAlert tone="error">{error}</FormAlert>}

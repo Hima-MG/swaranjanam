@@ -14,6 +14,8 @@ export interface SessionUser {
   email: string | null;
   name: string | null;
   role: Role;
+  /** Firebase `email_verified` (absent on users built outside a session, e.g. tests and jobs). */
+  emailVerified?: boolean;
 }
 
 /** Firebase allows session cookies between 5 minutes and 14 days. */
@@ -44,6 +46,7 @@ function toSessionUser(claims: DecodedIdToken): SessionUser {
     email: claims.email ?? null,
     name: typeof claims.name === "string" ? claims.name : null,
     role: roleFromClaims(claims),
+    emailVerified: claims.email_verified === true,
   };
 }
 

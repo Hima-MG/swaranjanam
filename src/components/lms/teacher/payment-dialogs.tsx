@@ -66,7 +66,7 @@ export function RecordPaymentDialog({
   enrollmentOptions: { id: string; label: string }[];
   /** Packages (legacy prepaid billing). */
   packageOptions?: { id: string; label: string }[];
-  /** Class-based billing: values "advance:<accountId>" or "invoice:<invoiceId>". */
+  /** Class-based billing: values "advance:<accountId>", "invoice:<invoiceId>" or "registration:<registrationId>". */
   billingOptions?: { value: string; label: string }[];
   /** The academy's accepted methods (teacher settings). */
   methods?: PaymentMethod[];
@@ -113,6 +113,7 @@ export function RecordPaymentDialog({
                 enrollmentId: kind === "enrollment" ? id : undefined,
                 advanceAccountId: kind === "advance" ? id : undefined,
                 invoiceId: kind === "invoice" ? id : undefined,
+                registrationId: kind === "registration" ? id : undefined,
                 amount: data.get("amount"),
                 method: data.get("method"),
                 reference: data.get("reference"),
