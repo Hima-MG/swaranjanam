@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
-import { AddMemberForm, BatchFormDialog, RemoveMemberDialog, ScheduleBatchClassDialog, TransferMemberDialog } from "@/components/lms/teacher/batch-controls";
+import { AddMemberForm, BatchFormDialog, DeleteBatchDialog, RemoveMemberDialog, ScheduleBatchClassDialog, TransferMemberDialog } from "@/components/lms/teacher/batch-controls";
 import { CancelClassDialog, RecordOutcomeDialog } from "@/components/lms/teacher/class-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,6 +88,7 @@ async function BatchDetail({ params }: { params: Params }) {
             maxCapacity={MAX_BATCH_CAPACITY}
             existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, schedule: batch.schedule, weekly: batch.weekly, meetUrl: batch.meetUrl, capacity: batch.capacity, status: batch.status }}
           />
+          <DeleteBatchDialog batchId={batch.id} name={batch.name} memberCount={active.length} />
         </div>
       </div>
 

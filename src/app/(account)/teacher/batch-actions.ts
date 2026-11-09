@@ -10,7 +10,8 @@ import { ACADEMY_TIME_ZONE, formatClassTime, normalizeMeetUrl, parseClassTimes }
 import { writeAudit } from "@/lib/lms/server/audit";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
 import { parseWeeklySchedule, scheduleLabel } from "@/lib/lms/registration";
-import { addMemberTx, createBatchRecord, mapBatch, mapMember, removeMemberTx, transferMemberTx } from "@/lib/lms/server/batches";
+import { batchDeletionPlan, isBatchEligible } from "@/lib/lms/academy-courses";
+import { addMemberTx, batchUsage, createBatchRecord, mapBatch, mapMember, removeMemberTx, transferMemberTx } from "@/lib/lms/server/batches";
 import { classBillingConfigRef, mapAccount, mapConfig } from "@/lib/lms/server/class-billing";
 import { col, db, mapCourse } from "@/lib/lms/server/db";
 import { assertStudent } from "@/lib/lms/server/students";
@@ -70,6 +71,7 @@ export async function createBatch(input: BatchInput): Promise<ActionResult<{ bat
     if (Object.keys(parsed.errors).length) throw new AccessError("Please fix the highlighted fields.", parsed.errors);
     const [course, teacher] = await Promise.all([col("courses").doc(input.courseId as string).get().then(mapCourse), teacherFor(input?.teacherId)]);
     if (!course) throw new AccessError("Please fix the highlighted fields.", { courseId: "That course could not be found." });
+    if (!isBatchEligible(course)) throw new AccessError("Please fix the highlighted fields.", { courseId: "Batches can only be created for the academy's main courses." });
     const batchId = await createBatchRecord(user, {
       name: parsed.name,
       course: { id: course.id, title: course.title },
@@ -82,6 +84,54 @@ export async function createBatch(input: BatchInput): Promise<ActionResult<{ bat
     await writeAudit(user, { action: "batch.create", targetType: "batch", targetId: batchId, summary: `Created batch "${parsed.name}" for ${course.title} (${scheduleLabel(parsed.weekly!)})` });
     refresh();
     return { batchId };
+  });
+}
+
+/**
+ * "Delete batch". Never touches students, enrolments, attendance, invoices or
+ * payments: a batch with any history is archived (Inactive) instead, and only
+ * a never-used batch document is deleted. Learners must be removed first.
+ */
+export async function deleteBatch(batchId: unknown): Promise<ActionResult<{ outcome: "archived" | "deleted" }>> {
+  return runAction("deleteBatch", async () => {
+    const user = await requireActionUser("teacher");
+    if (!isValidId(batchId)) throw new AccessError("That batch could not be found.");
+    const usage = await batchUsage(batchId);
+    const plan = batchDeletionPlan(usage);
+    if (plan.kind === "blocked") throw new AccessError(plan.reason);
+    const ref = col("batches").doc(batchId);
+    const result = await db().runTransaction(async (tx) => {
+      const batch = mapBatch(await tx.get(ref));
+      if (!batch) throw new AccessError("That batch could not be found.");
+      const recheck = batchDeletionPlan({ activeMembers: batch.memberCount, historyRecords: usage.historyRecords });
+      if (recheck.kind === "blocked") throw new AccessError(recheck.reason);
+      let outcome: "archived" | "deleted" = recheck.kind === "archive" ? "archived" : "deleted";
+      if (outcome === "deleted") {
+        // Re-check inside the transaction: a class or member added meanwhile turns this into an archive.
+        const [members, classes] = await Promise.all([
+          tx.get(col("batchMembers").where("batchId", "==", batch.id).limit(1)),
+          tx.get(col("liveClasses").where("batchId", "==", batch.id).limit(1)),
+        ]);
+        if (!members.empty || !classes.empty) outcome = "archived";
+      }
+      if (outcome === "deleted") tx.delete(ref);
+      else if (batch.status !== "archived") {
+        tx.update(ref, {
+          status: "archived",
+          updatedAt: FieldValue.serverTimestamp(),
+          history: FieldValue.arrayUnion({ at: Timestamp.now(), by: user.uid, byEmail: user.email, change: "Archived (delete requested; history kept)" }),
+        });
+      }
+      return { outcome, name: batch.name };
+    });
+    await writeAudit(user, {
+      action: result.outcome === "deleted" ? "batch.delete" : "batch.archive",
+      targetType: "batch",
+      targetId: batchId,
+      summary: result.outcome === "deleted" ? `Deleted unused batch "${result.name}"` : `Archived batch "${result.name}" (has history; nothing deleted)`,
+    });
+    refresh();
+    return { outcome: result.outcome };
   });
 }
 

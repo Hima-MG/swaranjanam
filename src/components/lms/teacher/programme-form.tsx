@@ -77,6 +77,7 @@ export function ProgrammeForm({ courseId, programme }: { courseId: string; progr
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="pg-fee">Total fee (₹)</Label>
           <Input id="pg-fee" name="fee" inputMode="decimal" required defaultValue={p ? String(p.feeMinor / 100) : ""} />
+          <p className="text-xs text-muted-foreground">Complete programme fee, paid in full at enrolment. No monthly billing.</p>
           <Err message={e.fee} />
         </div>
         <div className="flex flex-col gap-1.5">

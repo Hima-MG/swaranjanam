@@ -16,7 +16,7 @@
 //   and invoices already issued are never recalculated.
 
 import { isPeriod } from "@/lib/lms/class-billing";
-import { isTime, minutesOf, WEEKDAYS, type TimeRange, type Weekday } from "@/lib/lms/registration";
+import { isTime, minutesOf, SHARED_RATES, WEEKDAYS, type TimeRange, type Weekday } from "@/lib/lms/registration";
 
 export const MAX_COURSE_PRICE_RUPEES = 100_000;
 /** Batches are small groups: the academy's limit is 5 students. */
@@ -30,6 +30,10 @@ export interface CoursePricing {
   batchMinor: number | null;
   /** Per individual session (paise). Null when individual classes are off. */
   individualMinor: number | null;
+  /** Learn Together batch, per person per class (paise). Null when batch classes are off. */
+  sharedBatchMinor: number | null;
+  /** Learn Together one-to-one, per person per session (paise). Null when individual classes are off. */
+  sharedIndividualMinor: number | null;
   /** Default capacity for new batches of this course. */
   batchCapacity: number;
   currency: "INR";
@@ -55,7 +59,16 @@ const paise = (v: unknown): v is number => typeof v === "number" && Number.isSaf
 export function effectiveCoursePricing(stored: unknown, confirmed: { batchMinor: number; individualMinor: number }): CoursePricing {
   const p = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : null;
   if (!p) {
-    return { batchEnabled: true, individualEnabled: true, batchMinor: confirmed.batchMinor, individualMinor: confirmed.individualMinor, batchCapacity: DEFAULT_BATCH_CAPACITY, currency: "INR" };
+    return {
+      batchEnabled: true,
+      individualEnabled: true,
+      batchMinor: confirmed.batchMinor,
+      individualMinor: confirmed.individualMinor,
+      sharedBatchMinor: SHARED_RATES.batchMinor,
+      sharedIndividualMinor: SHARED_RATES.individualMinor,
+      batchCapacity: DEFAULT_BATCH_CAPACITY,
+      currency: "INR",
+    };
   }
   const batchEnabled = p.batchEnabled === true && paise(p.batchMinor);
   const individualEnabled = p.individualEnabled === true && paise(p.individualMinor);
@@ -65,6 +78,9 @@ export function effectiveCoursePricing(stored: unknown, confirmed: { batchMinor:
     individualEnabled,
     batchMinor: batchEnabled ? (p.batchMinor as number) : null,
     individualMinor: individualEnabled ? (p.individualMinor as number) : null,
+    // Saved before Learn Together rates were per course: the academy's confirmed shared rates.
+    sharedBatchMinor: batchEnabled ? (paise(p.sharedBatchMinor) ? p.sharedBatchMinor : SHARED_RATES.batchMinor) : null,
+    sharedIndividualMinor: individualEnabled ? (paise(p.sharedIndividualMinor) ? p.sharedIndividualMinor : SHARED_RATES.individualMinor) : null,
     batchCapacity: Math.min(Math.max(cap, 1), MAX_BATCH_CAPACITY_SETTING),
     currency: "INR",
   };
@@ -97,6 +113,11 @@ export function parseCoursePricing(input: Record<string, unknown>): { value: Cou
   const individualEnabled = on(input.individualEnabled);
   const batch = rupeesToPaise(input.batchPrice);
   const individual = rupeesToPaise(input.individualPrice);
+  // Learn Together (per person); left empty = the academy's confirmed shared rate.
+  const sharedBatch = rupeesToPaise(input.sharedBatchPrice);
+  const sharedIndividual = rupeesToPaise(input.sharedIndividualPrice);
+  if (sharedBatch === undefined) errors.sharedBatchPrice = "Enter a valid amount, or leave it empty for the academy rate.";
+  if (sharedIndividual === undefined) errors.sharedIndividualPrice = "Enter a valid amount, or leave it empty for the academy rate.";
   const capText = typeof input.batchCapacity === "number" ? String(input.batchCapacity) : typeof input.batchCapacity === "string" ? input.batchCapacity.trim() : "";
   const cap = capText === "" ? DEFAULT_BATCH_CAPACITY : /^\d{1,2}$/.test(capText) ? Number(capText) : NaN;
 
@@ -119,6 +140,8 @@ export function parseCoursePricing(input: Record<string, unknown>): { value: Cou
       individualEnabled,
       batchMinor: batchEnabled ? (batch as number) : null,
       individualMinor: individualEnabled ? (individual as number) : null,
+      sharedBatchMinor: batchEnabled ? (sharedBatch ?? SHARED_RATES.batchMinor) : null,
+      sharedIndividualMinor: individualEnabled ? (sharedIndividual ?? SHARED_RATES.individualMinor) : null,
       batchCapacity: batchEnabled ? cap : DEFAULT_BATCH_CAPACITY,
       currency: "INR",
     },

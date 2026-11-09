@@ -19,7 +19,6 @@ import { PROGRAMME_TYPE_LABELS } from "@/lib/lms/programme";
 import { getPublishedCourseBySlug, getPublishedCourses, relatedCourses } from "@/lib/catalog/server";
 import { BEFORE_FIRST_CLASS, CLASS_STRUCTURE, WORKBOOK_FOUNDATION_SLUGS } from "@/data/before-first-class";
 import { formatMoney } from "@/lib/format";
-import { SHARED_RATES } from "@/lib/lms/registration";
 import { COURSE_AVAILABILITY_LABELS } from "@/types/course";
 
 // Course pages are rendered on first visit (behind loading.tsx) and cached
@@ -119,9 +118,9 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
                 <p className="-mt-3 text-sm text-muted-foreground">
                   Learn Together (2 people, one login):{" "}
                   {[
-                    course.fee.batchMinor !== null ? `batch ${formatMoney(SHARED_RATES.batchMinor)} per person (${formatMoney(SHARED_RATES.batchMinor * 2)} for two)` : "",
-                    course.fee.individualMinor !== null
-                      ? `one-to-one ${formatMoney(SHARED_RATES.individualMinor)} per person (${formatMoney(SHARED_RATES.individualMinor * 2)} for two)`
+                    course.fee.batchMinor !== null && course.fee.sharedBatchMinor !== null ? `batch ${formatMoney(course.fee.sharedBatchMinor)} per person (${formatMoney(course.fee.sharedBatchMinor * 2)} for two)` : "",
+                    course.fee.individualMinor !== null && course.fee.sharedIndividualMinor !== null
+                      ? `one-to-one ${formatMoney(course.fee.sharedIndividualMinor)} per person (${formatMoney(course.fee.sharedIndividualMinor * 2)} for two)`
                       : "",
                   ]
                     .filter(Boolean)

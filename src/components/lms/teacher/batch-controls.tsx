@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowRightLeft, CalendarPlus, Pencil, Plus, UserMinus, UserPlus } from "lucide-react";
+import { ArrowRightLeft, CalendarPlus, Pencil, Plus, Trash2, UserMinus, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { addBatchMember, createBatch, removeBatchMember, scheduleBatchClass, transferBatchMember, updateBatch } from "@/app/(account)/teacher/batch-actions";
+import { addBatchMember, createBatch, deleteBatch, removeBatchMember, scheduleBatchClass, transferBatchMember, updateBatch } from "@/app/(account)/teacher/batch-actions";
 import { FormAlert } from "@/components/forms/form-alert";
 import { useServerAction } from "@/components/lms/use-server-action";
 import { Button } from "@/components/ui/button";
@@ -289,6 +289,63 @@ export function AddMemberForm({ batchId, candidates, disabled }: { batchId: stri
       {error && !fieldErrors.studentId && <FormAlert tone="error">{error}</FormAlert>}
       {success && <FormAlert tone="success">{success}</FormAlert>}
     </form>
+  );
+}
+
+/** "Delete batch": names the batch and its learner count; the server archives a batch with history. */
+export function DeleteBatchDialog({ batchId, name, memberCount }: { batchId: string; name: string; memberCount: number }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const { pending, error, run, reset } = useServerAction();
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(next) => {
+        if (pending) return;
+        if (next) reset();
+        setOpen(next);
+      }}
+      className="sm:max-w-md"
+      trigger={
+        <Button type="button" variant="outline" size="sm" className="text-destructive">
+          <Trash2 data-icon="inline-start" />
+          Delete batch
+        </Button>
+      }
+      title={`Delete batch "${name}"?`}
+      description={`${memberCount} learner${memberCount === 1 ? " is" : "s are"} assigned to this batch.`}
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-muted-foreground">
+          {memberCount > 0
+            ? "Remove or transfer every learner first."
+            : "If this batch has any classes, attendance, invoices, payments or past learners, it is archived (marked Inactive) instead of deleted."}{" "}
+          Student accounts, enrolments, attendance, invoices and payment history are never deleted.
+        </p>
+        {error && <FormAlert tone="error">{error}</FormAlert>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+            Back
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={pending || memberCount > 0}
+            onClick={() =>
+              run(() => deleteBatch(batchId), {
+                onSuccess: (data) => {
+                  setOpen(false);
+                  if ((data as { outcome?: string } | null)?.outcome === "deleted") router.push("/teacher/batches");
+                },
+              })
+            }
+          >
+            {pending && <Spinner className="size-4 text-current" />}
+            Delete batch
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

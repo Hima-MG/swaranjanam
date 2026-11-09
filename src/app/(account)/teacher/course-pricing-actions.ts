@@ -24,7 +24,7 @@ export async function updateCoursePricing(courseId: unknown, input: Record<strin
       action: "course.pricing",
       targetType: "course",
       targetId: course.id,
-      summary: `Course pricing for "${course.title}" (new students): batch ${rupees(pricing.batchMinor)} per class, individual ${rupees(pricing.individualMinor)} per session${
+      summary: `Course pricing for "${course.title}" (new students): batch ${rupees(pricing.batchMinor)} per class, individual ${rupees(pricing.individualMinor)} per session, Learn Together ${rupees(pricing.sharedBatchMinor)} batch / ${rupees(pricing.sharedIndividualMinor)} one-to-one per person${
         hadPricing ? "" : " (first saved; replaces the confirmed default rates)"
       }`,
     });

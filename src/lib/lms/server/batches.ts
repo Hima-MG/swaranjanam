@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue, Timestamp, type DocumentData, type DocumentSnapshot } from "firebase-admin/firestore";
 
 import type { SessionUser } from "@/lib/auth/session";
+import { courseOptionsFrom, type BatchUsage } from "@/lib/lms/academy-courses";
 import {
   accountIdFor,
   CLASS_BLOCK_MESSAGES,
@@ -543,12 +544,25 @@ export async function listTeachers(user: SessionUser) {
   return snap.docs.map((d) => ({ uid: d.id, label: str(d.get("displayName")) ?? str(d.get("email")) ?? d.id }));
 }
 
-/** Courses that batches can belong to (drafts excluded). */
+/** Courses a new batch can belong to: the academy's main courses (lib/lms/academy-courses.ts). */
 export async function listCourseOptions(user: SessionUser) {
   if (user.role !== "teacher") throw new Error("Teacher role required");
-  const snap = await col("courses").select("title", "status").get();
-  return snap.docs
-    .filter((d) => d.get("status") !== "draft")
-    .map((d) => ({ id: d.id, title: String(d.get("title") ?? d.id) }))
-    .sort((a, b) => a.title.localeCompare(b.title));
+  const snap = await col("courses").select("title", "slug", "status", "programme").get();
+  return courseOptionsFrom(
+    snap.docs.map((d) => ({ id: d.id, slug: String(d.get("slug") || d.id), title: String(d.get("title") ?? d.id), status: String(d.get("status") ?? "draft"), programme: d.get("programme") ?? null })),
+  );
+}
+
+/** Records referencing a batch, for "Delete batch" (archive when anything exists). */
+export async function batchUsage(batchId: string): Promise<BatchUsage> {
+  const [members, ...history] = await Promise.all([
+    col("batchMembers").where("batchId", "==", batchId).select("status").get(),
+    ...(["liveClasses", "billableClasses", "billingAccounts", "invoices", "registrations", "payments"] as const).map((name) =>
+      col(name).where("batchId", "==", batchId).count().get(),
+    ),
+  ]);
+  return {
+    activeMembers: members.docs.filter((d) => d.get("status") === "active").length,
+    historyRecords: members.size + history.reduce((sum, snap) => sum + snap.data().count, 0),
+  };
 }

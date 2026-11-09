@@ -44,8 +44,15 @@ export async function saveCoursePricing(user: Actor, courseId: string, input: Re
         by: user.uid,
         byEmail: user.email,
         scope: "new_students",
-        from: old ? { batchMinor: old.batchEnabled ? (old.batchMinor ?? null) : null, individualMinor: old.individualEnabled ? (old.individualMinor ?? null) : null } : null,
-        to: { batchMinor: value.batchMinor, individualMinor: value.individualMinor },
+        from: old
+          ? {
+              batchMinor: old.batchEnabled ? (old.batchMinor ?? null) : null,
+              individualMinor: old.individualEnabled ? (old.individualMinor ?? null) : null,
+              sharedBatchMinor: old.batchEnabled ? (old.sharedBatchMinor ?? null) : null,
+              sharedIndividualMinor: old.individualEnabled ? (old.sharedIndividualMinor ?? null) : null,
+            }
+          : null,
+        to: { batchMinor: value.batchMinor, individualMinor: value.individualMinor, sharedBatchMinor: value.sharedBatchMinor, sharedIndividualMinor: value.sharedIndividualMinor },
         effectiveFrom: new Date().toISOString(),
         note: "Applies to students who enrol from now on. Enrolled students keep their agreed rate.",
       }),

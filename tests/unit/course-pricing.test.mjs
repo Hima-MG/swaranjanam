@@ -27,7 +27,7 @@ describe("course-specific pricing", () => {
     assert.deepEqual([rateFor(b, "batch"), rateFor(b, "individual")], [35_000, 60_000]);
     const batchOnly = parseCoursePricing({ batchEnabled: "on", batchPrice: "500", individualPrice: "" }).value;
     assert.deepEqual([batchOnly.individualEnabled, rateFor(batchOnly, "individual")], [false, null]);
-    assert.deepEqual(publicFeesFromPricing(batchOnly), { batchMinor: 50_000, individualMinor: null, batchAdvanceMinor: 50_000, siblingDiscount: null });
+    assert.deepEqual(publicFeesFromPricing(batchOnly), { batchMinor: 50_000, individualMinor: null, sharedBatchMinor: 36_000, sharedIndividualMinor: null, batchAdvanceMinor: 50_000, siblingDiscount: null });
   });
 
   test("validation: positive amounts only; a disabled type needs no price; at least one type", () => {

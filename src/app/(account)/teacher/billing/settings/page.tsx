@@ -4,11 +4,13 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { PolicyForm, RateVersionForm } from "@/components/lms/teacher/class-billing-controls";
+import { PaymentMethodsForm } from "@/components/lms/teacher/pricing-controls";
 import { TeacherPageHeader } from "@/components/lms/teacher/teacher-page-header";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { BILLING_START_PERIOD, nextPeriod, PENDING_DECISIONS, periodLabel, periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
+import { getBillingSettings } from "@/lib/lms/server/billing";
 import { getClassBillingConfig } from "@/lib/lms/server/class-billing";
 import { onlinePaymentsStatus } from "@/lib/payments/razorpay";
 
@@ -16,7 +18,7 @@ export const metadata: Metadata = { title: "Rates & policy · Teacher" };
 
 async function Settings() {
   await requireRole("teacher", "/teacher/billing/settings");
-  const config = await getClassBillingConfig();
+  const [config, paymentSettings] = await Promise.all([getClassBillingConfig(), getBillingSettings()]);
   const online = onlinePaymentsStatus();
   const nowPeriod = periodOf(new Date().toISOString());
   const current = rateVersionForPeriod(config.rateVersions, nowPeriod);
@@ -60,7 +62,11 @@ async function Settings() {
       </section>
 
       <section aria-labelledby="rates" className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft">
-        <h2 id="rates" className="type-h3">Rates</h2>
+        <h2 id="rates" className="type-h3">Default academy rates</h2>
+        <p className="text-sm text-muted-foreground">
+          Used only for older billing accounts and for courses that have no prices of their own. Each course&apos;s prices are set in Course management
+          → course → Pricing.
+        </p>
         <ul className="flex flex-col gap-1 text-sm">
           {[...config.rateVersions]
             .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
@@ -73,6 +79,11 @@ async function Settings() {
             ))}
         </ul>
         <RateVersionForm minMonth={minMonth} />
+      </section>
+
+      <section aria-labelledby="methods" className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft">
+        <h2 id="methods" className="type-h3">Accepted payment methods</h2>
+        <PaymentMethodsForm methods={paymentSettings.methods} confirmed={paymentSettings.confirmed} />
       </section>
 
       <section aria-labelledby="policy" className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft">
