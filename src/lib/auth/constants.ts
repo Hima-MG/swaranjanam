@@ -11,6 +11,28 @@ export type Role = (typeof ROLES)[number];
 export const TEACHER_CLAIMS: readonly string[] = ["teacher", "admin"];
 
 /**
+ * The role of a signed-in account, or null when it has no valid role.
+ *
+ *  1. A role custom claim (set by `npm run set-role`) wins: "teacher"/"admin"
+ *     → teacher, "student" → student.
+ *  2. Without a claim, the `users/{uid}.role` profile field decides. Only the
+ *     Admin SDK can write it (Firestore rules deny every client write).
+ *  3. Anything else (no claim, missing or unknown profile role) → null: the
+ *     account gets an access error and is never treated as a teacher.
+ */
+export function resolveRole(claimRole: unknown, profileRole: unknown): Role | null {
+  if (typeof claimRole === "string") {
+    if (TEACHER_CLAIMS.includes(claimRole)) return "teacher";
+    if (claimRole === "student") return "student";
+  }
+  if (profileRole === "teacher" || profileRole === "student") return profileRole;
+  return null;
+}
+
+/** Shown when a signed-in account has no valid role. */
+export const NO_ROLE_MESSAGE = "This account does not have a valid role yet. Please contact the academy.";
+
+/**
  * HttpOnly session cookie name. `__session` is the one cookie name Firebase
  * Hosting forwards, which keeps that deployment option open.
  */

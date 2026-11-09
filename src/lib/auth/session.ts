@@ -6,8 +6,8 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { cache } from "react";
 
-import { ROLE_HOME, SESSION_COOKIE_NAME, TEACHER_CLAIMS, type Role } from "@/lib/auth/constants";
-import { AdminConfigError, getAdminAuth } from "@/lib/firebase/admin";
+import { resolveRole, ROLE_HOME, SESSION_COOKIE_NAME, type Role } from "@/lib/auth/constants";
+import { AdminConfigError, getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 
 export interface SessionUser {
   uid: string;
@@ -33,19 +33,25 @@ export function getSessionMaxAgeMs(): number {
   return days * 24 * 60 * 60 * 1000;
 }
 
-/** Role comes only from the custom claim, which only trusted server code can set. */
-export function roleFromClaims(claims: DecodedIdToken): Role {
-  return typeof claims.role === "string" && TEACHER_CLAIMS.includes(claims.role)
-    ? "teacher"
-    : "student";
+/**
+ * The account's role (constants.ts → resolveRole): the trusted custom claim,
+ * else the server-written `users/{uid}.role` profile field; null = no valid
+ * role. Previously only the claim was read, so an account whose teacher role
+ * was set on its profile (without the claim) was silently treated as a student.
+ */
+export async function resolveSessionRole(claims: DecodedIdToken): Promise<Role | null> {
+  const fromClaim = resolveRole(claims.role, undefined);
+  if (fromClaim) return fromClaim;
+  const profile = await getAdminDb().collection("users").doc(claims.uid).get();
+  return resolveRole(undefined, profile.get("role"));
 }
 
-function toSessionUser(claims: DecodedIdToken): SessionUser {
+function toSessionUser(claims: DecodedIdToken, role: Role): SessionUser {
   return {
     uid: claims.uid,
     email: claims.email ?? null,
     name: typeof claims.name === "string" ? claims.name : null,
-    role: roleFromClaims(claims),
+    role,
     emailVerified: claims.email_verified === true,
   };
 }
@@ -62,7 +68,8 @@ export class SessionError extends Error {
 
 /**
  * Exchanges a freshly issued Firebase ID token for a session cookie.
- * Revoked or stale sign-ins are rejected.
+ * Revoked or stale sign-ins are rejected. The caller resolves the role
+ * (resolveSessionRole) once the profile exists.
  */
 export async function createSessionCookie(idToken: string) {
   const auth = getAdminAuth();
@@ -80,7 +87,7 @@ export async function createSessionCookie(idToken: string) {
 
   const expiresIn = getSessionMaxAgeMs();
   const cookie = await auth.createSessionCookie(idToken, { expiresIn });
-  return { cookie, expiresIn, decoded, user: toSessionUser(decoded) };
+  return { cookie, expiresIn, decoded };
 }
 
 /**
@@ -91,7 +98,8 @@ export async function createSessionCookie(idToken: string) {
  * - `strict: false` verifies signature and expiry locally — enough for
  *   cosmetic UI such as the navbar.
  *
- * Returns null for missing, expired, revoked or malformed sessions. Missing
+ * Returns null for missing, expired, revoked or malformed sessions, and for
+ * accounts without a valid role (never treated as a teacher). Missing
  * Admin configuration is re-thrown so misconfiguration is not silently
  * treated as "logged out" on protected routes.
  */
@@ -108,7 +116,8 @@ export const getSession = cache(async (strict: boolean = true): Promise<SessionU
 
   try {
     const claims = await getAdminAuth().verifySessionCookie(cookie, strict);
-    return toSessionUser(claims);
+    const role = await resolveSessionRole(claims);
+    return role ? toSessionUser(claims, role) : null;
   } catch (error) {
     if (error instanceof AdminConfigError) throw error;
     return null;
