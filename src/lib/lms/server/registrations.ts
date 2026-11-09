@@ -239,7 +239,7 @@ export interface PricedEnrolment {
 /**
  * The server-side price of an enrolment type for a course (never from the
  * browser). The class type must be offered by the course; individual types use
- * the course's own rate, Learn Together the fixed shared rates.
+ * the course's own rate, Learn Together the course's own shared rate.
  */
 export function priceEnrolment(course: CourseDetail, typeInput: unknown): PricedEnrolment {
   // Special Programme: the full programme fee, one payment, one learner (the enrolment type is not used).
@@ -258,7 +258,8 @@ export function priceEnrolment(course: CourseDetail, typeInput: unknown): Priced
   if (typeof courseRate !== "number" || courseRate <= 0) {
     throw new AccessError("Please fix the highlighted fields.", { mode: `${mode === "batch" ? "Batch" : "One-to-one"} classes are not offered for this course.` });
   }
-  return { enrolmentType, mode, ...enrolmentRates(enrolmentType, courseRate), special: false };
+  const sharedRate = mode === "batch" ? course.fee?.sharedBatchMinor : course.fee?.sharedIndividualMinor;
+  return { enrolmentType, mode, ...enrolmentRates(enrolmentType, courseRate, sharedRate), special: false };
 }
 
 /** The pricing fields stored on a registration (the agreed rate is per SESSION for the whole enrolment). */

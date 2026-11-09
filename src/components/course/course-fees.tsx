@@ -4,7 +4,6 @@ import type { LucideIcon } from "lucide-react";
 
 import { FEE_TERMS, type PublicCourseFees } from "@/lib/catalog/public-pricing";
 import { formatMoney } from "@/lib/format";
-import { SHARED_RATES } from "@/lib/lms/registration";
 import { cn } from "@/lib/utils";
 
 // A course's own per-class / per-session rates (only the class types it
@@ -58,28 +57,28 @@ export function feeOptions(fee: PublicCourseFees): FeeOption[] {
     ...(fee.individualMinor !== null
       ? [{ key: "individual", icon: User, title: "Individual class", amountMinor: fee.individualMinor, unit: "per session", note: "One-to-one with the teacher" }]
       : []),
-    // Learn Together: two learners under one login (fixed academy rates, per person per session).
-    ...(fee.batchMinor !== null
+    // Learn Together: two learners under one login (the course's own rates, per person per session).
+    ...(fee.batchMinor !== null && fee.sharedBatchMinor !== null
       ? [
           {
             key: "shared_batch",
             icon: UsersRound,
             title: "Learn Together – batch",
-            amountMinor: SHARED_RATES.batchMinor,
+            amountMinor: fee.sharedBatchMinor!,
             unit: "per person, per session",
-            note: `Two learners, one login: ${formatMoney(SHARED_RATES.batchMinor * 2)} per session for both`,
+            note: `Two learners, one login: ${formatMoney(fee.sharedBatchMinor! * 2)} per session for both`,
           },
         ]
       : []),
-    ...(fee.individualMinor !== null
+    ...(fee.individualMinor !== null && fee.sharedIndividualMinor !== null
       ? [
           {
             key: "shared_individual",
             icon: UsersRound,
             title: "Learn Together – one-to-one",
-            amountMinor: SHARED_RATES.individualMinor,
+            amountMinor: fee.sharedIndividualMinor!,
             unit: "per person, per session",
-            note: `Two learners, one login: ${formatMoney(SHARED_RATES.individualMinor * 2)} per session for both`,
+            note: `Two learners, one login: ${formatMoney(fee.sharedIndividualMinor! * 2)} per session for both`,
           },
         ]
       : []),

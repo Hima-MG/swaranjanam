@@ -13,6 +13,7 @@
 
 import type { RateVersion } from "@/lib/lms/class-billing";
 import type { CoursePricing } from "@/lib/lms/course-pricing";
+import { SHARED_RATES } from "@/lib/lms/registration";
 
 export const SIBLING_DISCOUNT_ENABLED = false;
 export const SIBLING_DISCOUNT_PERCENT = 10;
@@ -22,6 +23,10 @@ export interface PublicCourseFees {
   batchMinor: number | null;
   /** Individual (one-to-one) class, per session (paise); null when not offered. */
   individualMinor: number | null;
+  /** Learn Together batch, per person per session (paise); null when batch classes are not offered. */
+  sharedBatchMinor: number | null;
+  /** Learn Together one-to-one, per person per session (paise); null when one-to-one is not offered. */
+  sharedIndividualMinor: number | null;
   /** Batch initial payment (= one batch class), collected at enrolment; it pays for the first class (paise). */
   batchAdvanceMinor: number | null;
   /** Null while billing cannot apply the sibling discount. */
@@ -40,6 +45,8 @@ export function publicFeesFromRate(
   return {
     batchMinor: rate.batchMinor,
     individualMinor: rate.individualMinor,
+    sharedBatchMinor: SHARED_RATES.batchMinor,
+    sharedIndividualMinor: SHARED_RATES.individualMinor,
     batchAdvanceMinor: rate.batchAdvanceMinor,
     siblingDiscount: siblingDiscountEnabled
       ? { percent: SIBLING_DISCOUNT_PERCENT, batchMinor: discounted(rate.batchMinor, SIBLING_DISCOUNT_PERCENT) }
@@ -53,6 +60,8 @@ export function publicFeesFromPricing(pricing: CoursePricing, siblingDiscountEna
   return {
     batchMinor: batch,
     individualMinor: pricing.individualEnabled ? pricing.individualMinor : null,
+    sharedBatchMinor: batch ? pricing.sharedBatchMinor : null,
+    sharedIndividualMinor: pricing.individualEnabled ? pricing.sharedIndividualMinor : null,
     batchAdvanceMinor: batch,
     siblingDiscount: siblingDiscountEnabled && batch ? { percent: SIBLING_DISCOUNT_PERCENT, batchMinor: discounted(batch, SIBLING_DISCOUNT_PERCENT) } : null,
   };

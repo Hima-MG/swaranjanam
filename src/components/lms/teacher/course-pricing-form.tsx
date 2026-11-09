@@ -38,6 +38,8 @@ export function CoursePricingForm({ courseId, pricing, saved }: { courseId: stri
               batchCapacity: String(data.get("batchCapacity") ?? ""),
               individualEnabled: data.get("individualEnabled") === "on",
               individualPrice: String(data.get("individualPrice") ?? ""),
+              sharedBatchPrice: String(data.get("sharedBatchPrice") ?? ""),
+              sharedIndividualPrice: String(data.get("sharedIndividualPrice") ?? ""),
             }),
           { success: "Pricing saved. It applies to students who enrol from now on." },
         );
@@ -58,6 +60,11 @@ export function CoursePricingForm({ courseId, pricing, saved }: { courseId: stri
             <Label htmlFor="batchPrice">Price per class, per student (₹)</Label>
             <Input id="batchPrice" name="batchPrice" inputMode="decimal" defaultValue={rupees(pricing.batchMinor)} aria-invalid={!!e.batchPrice} />
             <Err message={e.batchPrice} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="sharedBatchPrice">Learn Together batch: price per person, per class (₹)</Label>
+            <Input id="sharedBatchPrice" name="sharedBatchPrice" inputMode="decimal" defaultValue={rupees(pricing.sharedBatchMinor)} aria-invalid={!!e.sharedBatchPrice} />
+            <Err message={e.sharedBatchPrice} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="batchCapacity">Maximum batch capacity</Label>
@@ -82,6 +89,17 @@ export function CoursePricingForm({ courseId, pricing, saved }: { courseId: stri
             <Label htmlFor="individualPrice">Price per session (₹)</Label>
             <Input id="individualPrice" name="individualPrice" inputMode="decimal" defaultValue={rupees(pricing.individualMinor)} aria-invalid={!!e.individualPrice} />
             <Err message={e.individualPrice} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="sharedIndividualPrice">Learn Together one-to-one: price per person, per session (₹)</Label>
+            <Input
+              id="sharedIndividualPrice"
+              name="sharedIndividualPrice"
+              inputMode="decimal"
+              defaultValue={rupees(pricing.sharedIndividualMinor)}
+              aria-invalid={!!e.sharedIndividualPrice}
+            />
+            <Err message={e.sharedIndividualPrice} />
           </div>
         </div>
       </fieldset>

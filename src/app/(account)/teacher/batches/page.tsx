@@ -17,7 +17,12 @@ async function Batches() {
   const [batches, courses, teachers] = await Promise.all([listBatches(teacher), listCourseOptions(teacher), listTeachers(teacher)]);
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {courses.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            New batches need a main course (Swara Foundation or Little Swaras). Set them up in Courses first.
+          </p>
+        )}
         <BatchFormDialog courses={courses} teachers={teachers} maxCapacity={MAX_BATCH_CAPACITY} />
       </div>
       {batches.length === 0 ? (

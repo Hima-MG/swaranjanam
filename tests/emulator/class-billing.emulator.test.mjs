@@ -657,7 +657,7 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
     assert.equal(bySlug.has(`template-${run}`), false, "unreviewed template course hidden");
     assert.equal(bySlug.has("little-swaras"), false, "a draft with an approved slug is not replaced by the fallback");
     assert.equal(bySlug.get("swara-foundation")?.source, "approved", "approved fallback shown");
-    assert.deepEqual(bySlug.get(`teacher-open-${run}`)?.fee, { batchMinor: 40_000, individualMinor: 75_000, batchAdvanceMinor: 40_000, siblingDiscount: null });
+    assert.deepEqual(bySlug.get(`teacher-open-${run}`)?.fee, { batchMinor: 40_000, individualMinor: 75_000, sharedBatchMinor: 36_000, sharedIndividualMinor: 70_000, batchAdvanceMinor: 40_000, siblingDiscount: null });
     assert.equal(bySlug.get(`teacher-soon-${run}`)?.fee, null);
     assert.doesNotMatch(JSON.stringify(result.data), /9999|4999|teacher-1/, "no legacy price or teacher ids");
     assert.deepEqual(await getPublicFees(), bySlug.get("swara-foundation").fee);

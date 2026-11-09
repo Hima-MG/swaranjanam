@@ -18,9 +18,9 @@ export interface EnrolmentChoice {
 /** Only the enrolment types whose class type the course offers. */
 export function enrolmentChoices(fee: PublicCourseFees): EnrolmentChoice[] {
   const choices: EnrolmentChoice[] = [];
-  const add = (type: EnrolmentType, courseRate: number | null) => {
+  const add = (type: EnrolmentType, courseRate: number | null, sharedRate?: number | null) => {
     if (courseRate === null) return;
-    const r = enrolmentRates(type, courseRate);
+    const r = enrolmentRates(type, courseRate, sharedRate);
     const unit = type === "batch" || type === "shared_batch" ? "class" : "session";
     const units = unit === "class" ? "classes" : "sessions";
     const shared = isSharedEnrolment(type);
@@ -38,8 +38,8 @@ export function enrolmentChoices(fee: PublicCourseFees): EnrolmentChoice[] {
   };
   add("batch", fee.batchMinor);
   add("individual", fee.individualMinor);
-  add("shared_batch", fee.batchMinor);
-  add("shared_individual", fee.individualMinor);
+  add("shared_batch", fee.batchMinor, fee.sharedBatchMinor);
+  add("shared_individual", fee.individualMinor, fee.sharedIndividualMinor);
   return choices;
 }
 

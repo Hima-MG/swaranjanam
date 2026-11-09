@@ -50,7 +50,7 @@ export const ENROLMENT_TYPE_LABELS: Record<EnrolmentType, string> = {
   shared_individual: "Learn Together – One-to-One",
 };
 export const SHARED_LEARNER_COUNT = 2;
-/** Learn Together, per learner per session (paise). */
+/** Learn Together, per learner per session (paise): the academy's confirmed default; each course can set its own (course pricing). */
 export const SHARED_RATES = { batchMinor: 36_000, individualMinor: 70_000 } as const;
 
 export function isSharedEnrolment(type: EnrolmentType): boolean {
@@ -65,11 +65,17 @@ export function classTypeOf(type: EnrolmentType): ClassType {
 /**
  * Server-side price of one session for an enrolment type: the per-learner rate
  * and the session total (per-learner × learners). Individual types use the
- * course's own rate; Learn Together uses the fixed shared rates.
+ * course's own rate; Learn Together the course's own shared rate (per learner),
+ * or the academy's confirmed shared rate when the course has none.
  */
-export function enrolmentRates(type: EnrolmentType, courseRateMinor: number): { perLearnerMinor: number; learnerCount: number; sessionMinor: number } {
+export function enrolmentRates(
+  type: EnrolmentType,
+  courseRateMinor: number,
+  sharedRateMinor?: number | null,
+): { perLearnerMinor: number; learnerCount: number; sessionMinor: number } {
   const shared = isSharedEnrolment(type);
-  const perLearnerMinor = shared ? (classTypeOf(type) === "batch" ? SHARED_RATES.batchMinor : SHARED_RATES.individualMinor) : courseRateMinor;
+  const fallback = classTypeOf(type) === "batch" ? SHARED_RATES.batchMinor : SHARED_RATES.individualMinor;
+  const perLearnerMinor = shared ? (typeof sharedRateMinor === "number" && sharedRateMinor > 0 ? sharedRateMinor : fallback) : courseRateMinor;
   const learnerCount = shared ? SHARED_LEARNER_COUNT : 1;
   return { perLearnerMinor, learnerCount, sessionMinor: perLearnerMinor * learnerCount };
 }

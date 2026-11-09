@@ -26,7 +26,7 @@ const entry = (overrides) => ({ record: record(overrides), moduleCount: 1, lesso
 
 describe("public fees come from the billing rates in force", () => {
   test("confirmed fees: batch ₹400, individual ₹750, ₹400 enrolment advance; sibling discount OFF until billing applies it", () => {
-    assert.deepEqual(FEES, { batchMinor: 40_000, individualMinor: 75_000, batchAdvanceMinor: 40_000, siblingDiscount: null });
+    assert.deepEqual(FEES, { batchMinor: 40_000, individualMinor: 75_000, sharedBatchMinor: 36_000, sharedIndividualMinor: 70_000, batchAdvanceMinor: 40_000, siblingDiscount: null });
     assert.equal(SIBLING_DISCOUNT_ENABLED, false);
     assert.equal(SIBLING_DISCOUNT_PERCENT, 10);
   });
