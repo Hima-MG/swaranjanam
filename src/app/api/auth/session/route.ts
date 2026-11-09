@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { ROLE_HOME, SESSION_COOKIE_NAME, sanitizeNextPath } from "@/lib/auth/constants";
+import { NO_ROLE_MESSAGE, ROLE_HOME, SESSION_COOKIE_NAME, sanitizeNextPath } from "@/lib/auth/constants";
 import { rejectCrossSiteRequest } from "@/lib/auth/csrf";
 import { authLog, describeError } from "@/lib/auth/diagnostics";
 
@@ -59,12 +59,12 @@ export async function POST(request: Request) {
     authLog("session.create", "admin-sdk-load-failed", describeError(error), "error");
     return unavailable();
   }
-  const { createSessionCookie, ensureUserProfile, recordSignIn, SessionError, AdminConfigError } = server;
+  const { createSessionCookie, ensureUserProfile, recordSignIn, resolveSessionRole, SessionError, AdminConfigError } = server;
 
   let stage = "verify-token";
   try {
-    const { cookie, expiresIn, decoded, user } = await createSessionCookie(body.idToken);
-    authLog("session.create", "token-verified", { provider: decoded.firebase.sign_in_provider, role: user.role });
+    const { cookie, expiresIn, decoded } = await createSessionCookie(body.idToken);
+    authLog("session.create", "token-verified", { provider: decoded.firebase.sign_in_provider });
 
     // First sign-in creates a student profile. The role is never read from the body.
     stage = "ensure-profile";
@@ -75,6 +75,15 @@ export async function POST(request: Request) {
       phone: body.profile?.phone,
       provider: decoded.firebase.sign_in_provider,
     });
+
+    // Role: the custom claim, else the existing users/{uid}.role (never overwritten above).
+    stage = "resolve-role";
+    const role = await resolveSessionRole(decoded);
+    if (!role) {
+      authLog("session.create", "no-valid-role", {}, "warn");
+      return Response.json({ error: NO_ROLE_MESSAGE }, { status: 403 });
+    }
+    const user = { role };
 
     await recordSignIn(decoded.uid);
 
