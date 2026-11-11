@@ -89,7 +89,15 @@ export async function saveClassRecording(user: SessionUser, classId: unknown, ur
         history: FieldValue.arrayUnion({ at: Timestamp.now(), by: user.uid, change }),
       });
     }
-    return { title: existing.title, date: existing.date, studentId: existing.studentId, change, records: siblings.length };
+    return {
+      title: existing.title,
+      date: existing.date,
+      studentId: existing.studentId,
+      change,
+      records: siblings.length,
+      videoId,
+      targets: siblings.map((s) => ({ classId: s.ref.id, studentId: s.record.studentId, accountId: s.record.billingAccountId })),
+    };
   });
 }
 

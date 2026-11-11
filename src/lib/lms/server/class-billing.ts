@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue, Timestamp, type DocumentData, type DocumentReference, type DocumentSnapshot, type Transaction } from "firebase-admin/firestore";
 
 import type { SessionUser } from "@/lib/auth/session";
+import { notifyInvoiceDueStates, notifyInvoiceIssued } from "@/lib/notifications/events";
 import {
   ADVANCE_STATUSES,
   BILLING_MODES,
@@ -768,6 +769,11 @@ async function readAccountInvoicesInTx(tx: Transaction, accountId: string) {
     }));
 }
 
+/** One account's invoices with their balances (read-only; used for payment reminders). */
+export async function readAccountInvoices(accountId: string) {
+  return db().runTransaction((tx) => readAccountInvoicesInTx(tx, accountId), { readOnly: true });
+}
+
 /**
  * Suspends (reversibly) when an invoice is unpaid after its payment deadline,
  * and restores as soon as no such invoice remains. Idempotent. Nothing is deleted.
@@ -820,6 +826,8 @@ export async function runScheduledBilling(actor: Actor, nowIso = new Date().toIS
     try {
       const r = await issueDueMonthlyInvoices(accountId, actor, nowIso);
       summary.invoicesCreated += r.created.length;
+      // After the invoice is committed; never fails the run (see lib/notifications).
+      for (const invoiceId of r.created) await notifyInvoiceIssued(invoiceId);
     } catch (error) {
       summary.errors += 1;
       console.error("[billing] monthly invoice generation failed:", accountId, (error as Error)?.message);
@@ -828,6 +836,8 @@ export async function runScheduledBilling(actor: Actor, nowIso = new Date().toIS
       const r = await evaluateSuspension(accountId, actor, Date.parse(nowIso));
       if (r === "suspended") summary.suspended += 1;
       if (r === "restored") summary.restored += 1;
+      // Payment-due reminder / overdue notice, once per invoice each.
+      await notifyInvoiceDueStates(accountId, Date.parse(nowIso));
     } catch (error) {
       summary.errors += 1;
       console.error("[billing] suspension evaluation failed:", accountId, (error as Error)?.message);

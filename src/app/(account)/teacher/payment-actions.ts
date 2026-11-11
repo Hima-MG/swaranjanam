@@ -5,6 +5,7 @@ import { refresh } from "next/cache";
 
 import { paiseToRupeesText, statusAfterPayment, summarizePackage } from "@/lib/lms/billing";
 import { writeAudit } from "@/lib/lms/server/audit";
+import { notifyVerifiedPayment } from "@/lib/notifications/events";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
 import { ADVANCE_CORRECTION_LABELS, type AdvanceCorrectionReason, advanceReversalError } from "@/lib/lms/class-billing";
 import { legacyPackageBlock } from "@/lib/lms/legacy-packages";
@@ -314,6 +315,8 @@ export async function recordPayment(input: RecordPaymentInput): Promise<ActionRe
       targetId: ref.id,
       summary: `Recorded ${status} payment of ${rupees(amountMinor!)} for ${result.label}${result.receiptNumber ? ` — receipt ${result.receiptNumber}` : ""}`,
     });
+    // A teacher-verified payment: notify the student (no-op unless the record is paid and verified).
+    if (status === "paid") await notifyVerifiedPayment(ref.id, "manual");
     refresh();
     return { paymentId: ref.id, receiptNumber: result.receiptNumber };
   });
@@ -480,6 +483,7 @@ export async function updatePaymentStatus(
     if (summary.accountId) await evaluateSuspension(summary.accountId, user);
 
     await writeAudit(user, { action: "payment.status", targetType: "payment", targetId: ref.id, summary: summary.text });
+    if (nextStatus === "paid") await notifyVerifiedPayment(ref.id, "manual");
     refresh();
     return null;
   });

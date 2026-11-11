@@ -6,6 +6,7 @@ import { requireActionUser, runAction } from "@/lib/lms/server/access";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { assignRegistrationToBatch, confirmIndividualSchedule, updateIndividualSchedule } from "@/lib/lms/server/registrations";
 import type { ActionResult } from "@/lib/lms/types";
+import { notifyBatchAssigned, notifyIndividualSchedule } from "@/lib/notifications/events";
 
 // Teacher (academy administrator) actions on website registrations. All checks
 // run on the server inside transactions (lib/lms/server/registrations.ts and
@@ -22,6 +23,7 @@ export async function assignToBatch(registrationId: unknown, batchId: unknown): 
       targetId: String(registrationId),
       summary: `Assigned registration ${String(registrationId)} to batch "${result.batchName}"`,
     });
+    await notifyBatchAssigned({ studentId: result.studentId, batchId: String(batchId) });
     refresh();
     return null;
   });
@@ -37,6 +39,7 @@ export async function confirmSchedule(registrationId: unknown, input: { days: un
       targetId: String(registrationId),
       summary: `Confirmed individual schedule: ${result.schedule}`,
     });
+    await notifyIndividualSchedule(String(registrationId), "confirmed");
     refresh();
     return null;
   });
@@ -52,6 +55,7 @@ export async function changeSchedule(registrationId: unknown, input: { days: unk
       targetId: String(registrationId),
       summary: `Changed individual schedule: ${result.previous ?? "—"} → ${result.schedule}`,
     });
+    if (result.previous !== result.schedule) await notifyIndividualSchedule(String(registrationId), "changed", result.previous || null);
     refresh();
     return null;
   });

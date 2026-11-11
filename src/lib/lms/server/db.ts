@@ -70,6 +70,9 @@ export const COLLECTIONS = {
   gatewayEvents: "gatewayEvents",
   // Website registrations: details, preferences and the initial payment (lib/lms/server/registrations.ts).
   registrations: "registrations",
+  // Student notifications and their emails (lib/notifications/service.ts).
+  notifications: "notifications",
+  emailOutbox: "emailOutbox",
 } as const;
 
 export function db() {

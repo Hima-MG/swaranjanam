@@ -8,6 +8,7 @@ import { readReceiptContext, writeReceipt } from "@/lib/lms/server/billing";
 import { applyVerifiedPayment, evaluateSuspension, readPaymentTarget, type PaymentTarget } from "@/lib/lms/server/class-billing";
 import { provisionRegistrationAccount, readGuestRegistration } from "@/lib/lms/server/guest-enrolment";
 import { col, db, toIso } from "@/lib/lms/server/db";
+import { notifyPaymentFailed, notifyVerifiedPayment } from "@/lib/notifications/events";
 import type { PaymentRecord } from "@/lib/lms/types";
 import {
   createRazorpayOrder,
@@ -272,6 +273,10 @@ export async function processVerifiedGatewayPayment(input: VerifiedGatewayPaymen
         console.error("[gateway] account provisioning will be retried:", (error as Error)?.message);
       }
     }
+    // Server-verified payment committed (after provisioning, so a guest's new account gets the in-app
+    // notice): notified once, keyed by the payment id — the checkout callback, recovery and webhook
+    // redeliveries never notify twice.
+    await notifyVerifiedPayment(result.paymentId, "online");
     return { outcome: result.outcome, paymentId: result.paymentId, receiptNumber: result.receiptNumber, needsReview: result.needsReview };
   }
   return result;
@@ -458,6 +463,13 @@ export async function recoverGuestPayment(registrationId: string, token: unknown
  * money moved, nothing else changes; the student can simply try again).
  */
 export async function recordGatewayPaymentFailure(input: { orderId: string; paymentId: string; code: string | null; description: string | null }): Promise<"noted" | "ignored"> {
+  const outcome = await noteGatewayPaymentFailure(input);
+  // Signed webhook only (never the browser); once per Razorpay payment id.
+  if (outcome === "noted") await notifyPaymentFailed(input.orderId, input.paymentId, input.description?.slice(0, 300) ?? null);
+  return outcome;
+}
+
+async function noteGatewayPaymentFailure(input: { orderId: string; paymentId: string; code: string | null; description: string | null }): Promise<"noted" | "ignored"> {
   const ref = col("gatewayOrders").doc(input.orderId);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);

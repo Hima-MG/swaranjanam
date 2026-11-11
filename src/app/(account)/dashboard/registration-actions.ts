@@ -6,6 +6,7 @@ import { requireActionUser, runAction } from "@/lib/lms/server/access";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { saveRegistration } from "@/lib/lms/server/registrations";
 import type { ActionResult } from "@/lib/lms/types";
+import { notifyRegistrationSubmitted } from "@/lib/notifications/events";
 
 // Website registration. The student is always the signed-in user; the course
 // must be listed as "Open for enrolment" and every field is re-validated on the
@@ -26,6 +27,7 @@ export async function saveMyRegistration(
       targetId: result.registrationId,
       summary: `${result.outcome === "created" ? "Registered" : "Updated registration"} for ${String(slug)} (${String(mode)})`,
     });
+    await notifyRegistrationSubmitted(user.uid, result.registrationId);
     refresh();
     return { registrationId: result.registrationId, initialAmountMinor: result.initialAmountMinor };
   });

@@ -8,6 +8,7 @@ import { getAdminAuth } from "@/lib/firebase/admin";
 import { MAX_BATCH_CAPACITY, parseCapacity } from "@/lib/lms/class-billing";
 import { ACADEMY_TIME_ZONE, formatClassTime, normalizeMeetUrl, parseClassTimes } from "@/lib/lms/classes";
 import { writeAudit } from "@/lib/lms/server/audit";
+import { notifyBatchAssigned } from "@/lib/notifications/events";
 import { AccessError, requireActionUser, runAction } from "@/lib/lms/server/access";
 import { parseWeeklySchedule, scheduleLabel } from "@/lib/lms/registration";
 import { batchDeletionPlan, isBatchEligible } from "@/lib/lms/academy-courses";
@@ -195,6 +196,7 @@ export async function addBatchMember(batchId: unknown, studentIdInput: unknown):
       targetId: batchId,
       summary: `Added ${student.label} to "${result.batchName}"${result.created ? " — billing account opened (₹400 first-class payment awaiting)" : ""}`,
     });
+    await notifyBatchAssigned({ studentId: student.uid, batchId });
     refresh();
     return null;
   });
@@ -224,6 +226,7 @@ export async function transferBatchMember(fromBatchId: unknown, studentId: unkno
       targetId: toBatchId,
       summary: `Moved student ${studentId} from "${result.from}" to "${result.to}" (billing unchanged)`,
     });
+    await notifyBatchAssigned({ studentId, batchId: toBatchId, previousBatchName: result.from });
     refresh();
     return null;
   });

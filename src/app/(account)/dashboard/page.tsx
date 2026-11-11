@@ -28,6 +28,8 @@ import { ENROLMENT_TYPE_LABELS, learnerNamesLabel, registrationStatusLabel } fro
 import { claimGuestRegistrations } from "@/lib/lms/server/guest-enrolment";
 import { listOwnRegistrations } from "@/lib/lms/server/registrations";
 import { formatDate } from "@/lib/format-date";
+import { NotificationBell } from "@/components/lms/student/notification-bell";
+import { listOwnNotifications } from "@/lib/notifications/service";
 
 export const metadata: Metadata = { title: "My Dashboard" };
 
@@ -36,7 +38,7 @@ async function StudentDashboard() {
   const user = await requireRole("student", "/dashboard");
   // Paid guest registrations made with this (verified) email are linked to the account now.
   await claimGuestRegistrations(user);
-  const [profile, overview, announcements, liveClasses, billing, ownTestimonials, batches, classBilling, registrations] = await Promise.all([
+  const [profile, overview, announcements, liveClasses, billing, ownTestimonials, batches, classBilling, registrations, notifications] = await Promise.all([
     getUserProfile(user.uid),
     getStudentOverview(user),
     listAnnouncementsForStudent(user),
@@ -50,6 +52,8 @@ async function StudentDashboard() {
     getOwnClassBilling(user),
     // Own website registrations only (bound to user.uid in the data layer).
     listOwnRegistrations(user),
+    // Own notifications only (bound to user.uid in the service).
+    listOwnNotifications(user),
   ]);
   const openRegistrations = registrations.filter((r) => r.status !== "cancelled");
   // In-app fee reminders (no email/WhatsApp provider is configured).
@@ -69,7 +73,10 @@ async function StudentDashboard() {
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="flex min-w-0 flex-col gap-6">
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft sm:p-8">
-          <p className="type-eyebrow text-gold">Namaskaram, {name.split(" ")[0]}</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="type-eyebrow text-gold">Namaskaram, {name.split(" ")[0]}</p>
+            <NotificationBell initial={notifications} />
+          </div>
           {overview.resume ? (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">

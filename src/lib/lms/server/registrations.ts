@@ -364,7 +364,8 @@ export async function assignRegistrationToBatch(user: SessionUser, id: unknown, 
   const registration = mapRegistration(await col("registrations").doc(id).get());
   if (!registration) throw new AccessError("That registration could not be found.");
   if (!registration.studentId) throw new AccessError("The student's account is not linked yet (a guest registration waiting for the student to sign in). Try again once it is linked.");
-  return addMemberTx(user, batchId, { uid: registration.studentId, name: learnerNamesLabel(registration.details.learners.map((l) => l.fullName)) || "Student" }, { registrationId: id });
+  const result = await addMemberTx(user, batchId, { uid: registration.studentId, name: learnerNamesLabel(registration.details.learners.map((l) => l.fullName)) || "Student" }, { registrationId: id });
+  return { ...result, studentId: registration.studentId };
 }
 
 /**

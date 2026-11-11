@@ -24,7 +24,7 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
     {
       question: "What are the class days and timings?",
       answer:
-        "Classes are held on any day except Sunday. Timings are fixed for each batch, based on the schedules of all enrolled students in India and abroad, to find the best common slot. Current batch: Saturdays, 7–8 PM IST.",
+        "Class schedules are confirmed after registration. The academy assigns students to suitable batches or confirms individual class timings based on teacher availability and student preferences. Students receive their confirmed schedule through their dashboard and email.",
     },
     {
       question: "Who can join?",
@@ -60,7 +60,7 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
     },
     {
       question: "Can students from abroad join?",
-      answer: "Absolutely! We already have students from abroad, and batch timings are fixed to suit both India and abroad.",
+      answer: "Absolutely! We already have students from abroad. Class timings are confirmed after registration, taking your time zone and preferences into account.",
     },
     {
       question: "What will be taught?",
@@ -70,7 +70,7 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
     {
       question: "Do I need any book or app?",
       answer:
-        "Yes. Please get Sangeetha Sampoorna – Beginners Level by Dr. Anuradha Mahesh (₹500 in India, $50 abroad; order on WhatsApp 80757 56318), and download the Jalra app from the Google Play Store or App Store for sruti and tala during class.",
+        "Yes. Please get Sangeetha Sampoorna – Beginners Level by Dr. Anuradha Mahesh (order on WhatsApp 80757 56318), and download the Jalra app from the Google Play Store or App Store for sruti and tala during class.",
     },
     {
       question: "How long is the course?",

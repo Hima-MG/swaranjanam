@@ -28,6 +28,7 @@ import {
 } from "@/lib/lms/server/class-billing";
 import { mapLiveClass, sessionSiblings } from "@/lib/lms/server/classes";
 import { col, db } from "@/lib/lms/server/db";
+import { notifyClassCancelled, notifyClassRescheduled, notifyRecordingAvailable } from "@/lib/notifications/events";
 import { saveClassRecording } from "@/lib/lms/server/recordings";
 import { assertStudent } from "@/lib/lms/server/students";
 import {
@@ -223,7 +224,7 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
 
     // History is computed from the record read INSIDE the transaction, so a
     // concurrent edit can never leave a stale "from" value in the history.
-    const { changes, rescheduled, reassigned } = await db().runTransaction(async (tx) => {
+    const { changes, rescheduled, reassigned, targets, previous } = await db().runTransaction(async (tx) => {
       const fresh = mapLiveClass(await tx.get(ref));
       if (!fresh || fresh.status !== "scheduled") throw new AccessError("This class changed. Please reload the page.");
       const siblings = (await sessionSiblings(tx, fresh)).filter((s) => s.record.status === "scheduled");
@@ -263,7 +264,14 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
       for (const s of siblings) {
         tx.update(s.ref, s.ref.id === ref.id ? { ...shared, studentId: student.uid } : shared);
       }
-      return { changes, rescheduled, reassigned };
+      return {
+        changes,
+        rescheduled,
+        reassigned,
+        // Only the learners of this session (never anyone else) are told about the move.
+        targets: siblings.map((s) => ({ classId: s.ref.id, studentId: s.ref.id === ref.id ? student.uid : s.record.studentId })),
+        previous: { startAt: fresh.startAt, endAt: fresh.endAt },
+      };
     });
     await writeAudit(user, {
       action: reassigned ? "class.reassign" : rescheduled ? "class.reschedule" : "class.update",
@@ -273,6 +281,9 @@ export async function updateClass(classId: unknown, input: ClassInput): Promise<
         ? `"${common.title}": ${changes.join("; ")}`
         : `Edited details of "${common.title}"`,
     });
+    if (rescheduled) {
+      await notifyClassRescheduled(targets, { title: common.title, previous, next: { startAt: times.start.toISOString(), endAt: times.end.toISOString() } });
+    }
     refresh();
     return null;
   });
@@ -354,6 +365,9 @@ export async function cancelClass(classId: unknown, reasonInput: unknown, kindIn
         label,
         billed,
         sessionFee,
+        startAt: existing.startAt,
+        endAt: existing.endAt,
+        targets: targets.map((t) => ({ classId: t.ref.id, studentId: t.record.studentId })),
       };
     });
     await writeAudit(user, {
@@ -362,6 +376,7 @@ export async function cancelClass(classId: unknown, reasonInput: unknown, kindIn
       targetId: title.batchId ?? title.packageId ?? title.studentId,
       summary: `Cancelled ${title.label} "${title.title}" (${title.when})${title.learners > 1 ? ` for ${title.learners} learners` : ""}${reason ? ` — ${reason}` : ""}${title.billed ? ` — billed for ${title.billed} learner(s) under the billing policy` : ""}${title.sessionFee === "payable" ? " — individual session fee remains payable (cancelled by the student)" : title.sessionFee === "no_charge" ? " — individual session: no charge" : ""}`,
     });
+    await notifyClassCancelled(title.targets, { title: title.title, startAt: title.startAt, endAt: title.endAt, kind, reason });
     refresh();
     return null;
   });
@@ -486,6 +501,7 @@ export async function setClassRecording(classId: unknown, urlInput: unknown): Pr
       targetId: info.studentId,
       summary: `${info.change} for "${info.title}" on ${info.date}`,
     });
+    if (info.videoId) await notifyRecordingAvailable(info.targets, { title: info.title, date: info.date, videoId: info.videoId });
     refresh();
     return null;
   });
