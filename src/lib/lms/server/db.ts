@@ -115,6 +115,29 @@ function price(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+/**
+ * Deep copy containing only values React can pass from Server to Client
+ * Components: Firestore Timestamps and Dates become ISO strings, other class
+ * instances (e.g. DocumentReference, GeoPoint) are dropped. Used for raw maps
+ * kept on records, such as a course's stored pricing (which carries an
+ * `updatedAt` Timestamp) — passing those through unchanged crashed the
+ * teacher course editor ("Only plain objects … can be passed to Client Components").
+ */
+export function plainData(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return typeof value === "function" || typeof value === "symbol" ? undefined : value;
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(plainData);
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    const plain = plainData(v);
+    if (plain !== undefined) out[key] = plain;
+  }
+  return out;
+}
+
 export function mapCatalogFields(data: DocumentData): CourseCatalogFields {
   return {
     subtitle: str(data.subtitle),
@@ -153,7 +176,7 @@ export function mapCourse(snapshot: DocumentSnapshot<DocumentData>): CourseRecor
     coverPublicId: str(data.coverPublicId) || null,
     status: oneOf(COURSE_STATUSES, data.status, "draft"),
     teacherIds: Array.isArray(data.teacherIds) ? data.teacherIds.filter((id): id is string => typeof id === "string") : [],
-    storedPricing: data.pricing && typeof data.pricing === "object" ? (data.pricing as Record<string, unknown>) : null,
+    storedPricing: data.pricing && typeof data.pricing === "object" ? (plainData(data.pricing) as Record<string, unknown>) : null,
     scheduleInfo: mapScheduleInfo(data.scheduleInfo),
     programme: mapProgramme(data.programme),
     createdAt: toIso(data.createdAt),
