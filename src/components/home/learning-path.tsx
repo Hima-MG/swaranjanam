@@ -1,5 +1,5 @@
 import { ArrowRight } from "lucide-react";
-import Link from "next/link";
+import { SectionLink } from "@/components/shared/section-link";
 
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -30,13 +30,13 @@ export function LearningPath() {
             </span>
             <h3 className="type-h3 text-cream">{step.title}</h3>
             <p className="text-sm leading-relaxed text-cream/75">{step.description}</p>
-            <Link
+            <SectionLink
               href="/#courses"
               className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold text-gold-light transition-colors hover:text-cream"
             >
               Explore courses
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
+            </SectionLink>
           </li>
         ))}
       </ol>

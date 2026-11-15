@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/loading-state";
 import { NativeSelect } from "@/components/ui/native-select";
+import { publicAvailability } from "@/lib/catalog/public-catalog";
 import { Textarea } from "@/components/ui/textarea";
 import type { CourseRecord } from "@/lib/lms/types";
 import { CATALOG_LIMITS, LIMITS } from "@/lib/lms/validation";
@@ -159,10 +160,10 @@ export function CourseCatalogForm({ course }: { course: CourseRecord }) {
             <NativeSelect
               id="catalog-availability"
               name="availability"
-              defaultValue={course.availability ?? ""}
+              defaultValue={publicAvailability({ ...course, status: "published" }) ?? ""}
               aria-invalid={e.availability ? true : undefined}
             >
-              <option value="">Not listed publicly</option>
+              <option value="">Not listed publicly (hidden even when published)</option>
               {COURSE_AVAILABILITY.map((option) => (
                 <option key={option} value={option}>
                   {COURSE_AVAILABILITY_LABELS[option]}

@@ -12,6 +12,7 @@ import { getPublishedCourses } from "@/lib/catalog/server";
 
 export const metadata: Metadata = {
   title: "Contact",
+  alternates: { canonical: "/contact" },
   description: "Get in touch with Swaraanjanam to enrol or ask about our courses, batches and fees.",
 };
 

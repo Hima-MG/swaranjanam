@@ -11,6 +11,7 @@ import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = {
   title: "About",
+  alternates: { canonical: "/about" },
   description: `Learn about ${siteConfig.fullName}, our teaching philosophy and how we bring the Carnatic tradition to students worldwide.`,
 };
 
