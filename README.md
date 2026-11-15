@@ -85,13 +85,12 @@ src/
     layout/               Navbar, Footer, Logo, navigation
     home/  shared/  forms/  auth/  decor/
   config/site.ts          Site name, contact details, navigation
-  data/                   Placeholder course catalogue and marketing copy
+  data/                   Marketing copy and FAQ (no course data)
   lib/                    Data access (courses.ts), formatting, utilities
     auth/                 Sessions, roles, CSRF guard, profiles, client flows
     firebase/             Client SDK (browser) and Admin SDK (server-only)
   types/                  Shared TypeScript types
 scripts/set-role.mjs      Trusted CLI to grant/remove the teacher role
-scripts/migrate-courses.mjs  One-off import of the former catalogue (input: scripts/legacy-catalogue.json)
 firestore.rules           Firestore security rules (deny by default)
 docs/firebase-setup.md    Firebase/Cloudinary setup, teacher bootstrap, manual test checklist
 ```

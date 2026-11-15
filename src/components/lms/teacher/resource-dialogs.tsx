@@ -27,6 +27,7 @@ const TYPE_LABELS: Record<UploadKind, string> = {
   video: "Video",
   audio: "Audio",
   pdf: "PDF notes",
+  document: "Notes / document (Word, PowerPoint, Excel, text)",
   image: "Image",
 };
 
@@ -101,7 +102,7 @@ export function UploadResourceDialog({
           void upload({
             file,
             kind,
-            getTicket: () => createResourceUpload(courseId, lessonId, kind),
+            getTicket: () => createResourceUpload(courseId, lessonId, kind, file.name),
             save: (receipt) =>
               addUploadedResource(courseId, lessonId, {
                 kind,
@@ -157,6 +158,7 @@ export function UploadResourceDialog({
           {(kind === "pdf" || kind === "image") && (
             <DownloadCheckbox id={`${idPrefix}-downloadable`} defaultChecked={kind === "pdf"} />
           )}
+          {kind === "document" && <p className="text-xs text-muted-foreground">Students open documents by downloading them.</p>}
         </fieldset>
         {busy && status && <UploadProgress status={status} progress={progress} phase={phase} />}
         {error && <FormAlert tone="error">{error}</FormAlert>}

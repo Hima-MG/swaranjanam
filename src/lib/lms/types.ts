@@ -69,7 +69,7 @@ export function isOpenToEnrolledStudents(status: CourseStatus): boolean {
 export const ENROLLMENT_STATUSES = ["active", "revoked"] as const;
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUSES)[number];
 
-export const RESOURCE_TYPES = ["video", "audio", "pdf", "image"] as const;
+export const RESOURCE_TYPES = ["video", "audio", "pdf", "document", "image"] as const;
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 
 /** Where a resource is hosted. External resources are approved video links only. */
@@ -86,7 +86,7 @@ export interface LessonResource {
   /** Cloudinary public id, for uploaded files. */
   publicId: string | null;
   /** Cloudinary resource type the asset was uploaded as ("image" | "video"). */
-  cloudinaryResourceType: "image" | "video" | null;
+  cloudinaryResourceType: "image" | "video" | "raw" | null;
   fileName: string | null;
   format: string | null;
   bytes: number | null;
@@ -127,6 +127,9 @@ export interface CourseRecord extends CourseCatalogFields {
   descriptionMl: string;
   thumbnailUrl: string | null;
   thumbnailPublicId: string | null;
+  /** Wide banner image for the public course page (optional). */
+  coverUrl: string | null;
+  coverPublicId: string | null;
   status: CourseStatus;
   teacherIds: string[];
   /**

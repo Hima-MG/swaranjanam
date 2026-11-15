@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 /** Shown when no courses are published yet. */
-export function CatalogEmpty({ message = "New courses are being prepared. Please check back soon, or contact us to join the next batch." }: { message?: string }) {
+export function CatalogEmpty({ message = "No courses have been added yet. Please check back soon, or contact us to ask about upcoming classes." }: { message?: string }) {
   return (
     <div className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-cream-deep/50 p-10 text-center">
       <BookOpen className="size-7 text-maroon" aria-hidden="true" />

@@ -21,7 +21,7 @@ const contactDetails = [
   { icon: Mail, label: "Email", value: contact.email, href: `mailto:${contact.email}` },
   { icon: InstagramIcon, label: "Instagram", value: social.instagram.handle, href: social.instagram.url },
   ...(social.youtubeUrl ? [{ icon: YouTubeIcon, label: "YouTube", value: "Our channel", href: social.youtubeUrl }] : []),
-  { icon: Phone, label: "Phone", value: contact.phone, href: `tel:${contact.phone.replace(/\s/g, "")}` },
+  { icon: Phone, label: "Phone", value: contact.phone, href: contact.phoneHref },
   { icon: MessageCircle, label: "WhatsApp", value: contact.whatsapp, href: contact.whatsappUrl },
   { icon: MapPin, label: "Location", value: contact.address },
   { icon: Clock, label: "Hours", value: contact.hours },

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SessionUser } from "@/lib/auth/session";
 import { getManagedCourse } from "@/lib/lms/server/access";
+import { logReadFailure } from "@/lib/lms/server/firestore-errors";
 import {
   buildOutline,
   col,
@@ -20,11 +21,26 @@ import { isValidId } from "@/lib/lms/validation";
 // session user and re-checks the teacher role; none trust ids alone.
 
 export interface TeacherCourseSummary extends CourseRecord {
-  moduleCount: number;
-  lessonCount: number;
-  activeStudentCount: number;
+  /** Null when the count could not be read (the course itself still lists). */
+  moduleCount: number | null;
+  lessonCount: number | null;
+  activeStudentCount: number | null;
 }
 
+async function countOrNull(label: string, query: FirebaseFirestore.Query): Promise<number | null> {
+  try {
+    return (await query.count().get()).data().count;
+  } catch (error) {
+    logReadFailure(`teacher.courses.count.${label}`, error);
+    return null;
+  }
+}
+
+/**
+ * Every course record, newest change first, with module, lesson and active
+ * student counts. A failed count never hides the course list; a failed read
+ * of the courses themselves throws (the page shows the classified cause).
+ */
 export async function listManagedCourses(user: SessionUser): Promise<TeacherCourseSummary[]> {
   if (user.role !== "teacher") return [];
   const snapshot = await col("courses").get();
@@ -32,24 +48,15 @@ export async function listManagedCourses(user: SessionUser): Promise<TeacherCour
 
   const summaries = await Promise.all(
     courses.map(async (course) => {
-      const [modules, lessons, students] = await Promise.all([
-        col("modules").where("courseId", "==", course.id).count().get(),
-        col("lessons").where("courseId", "==", course.id).count().get(),
-        col("enrollments")
-          .where("courseId", "==", course.id)
-          .where("status", "==", "active")
-          .count()
-          .get(),
+      const [moduleCount, lessonCount, activeStudentCount] = await Promise.all([
+        countOrNull("modules", col("modules").where("courseId", "==", course.id)),
+        countOrNull("lessons", col("lessons").where("courseId", "==", course.id)),
+        countOrNull("enrollments", col("enrollments").where("courseId", "==", course.id).where("status", "==", "active")),
       ]);
-      return {
-        ...course,
-        moduleCount: modules.data().count,
-        lessonCount: lessons.data().count,
-        activeStudentCount: students.data().count,
-      };
+      return { ...course, moduleCount, lessonCount, activeStudentCount };
     }),
   );
-  return summaries.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  return summaries.sort((a, b) => (b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? ""));
 }
 
 /** Course plus its module/lesson outline, or null when the course does not exist. */

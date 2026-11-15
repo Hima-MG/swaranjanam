@@ -49,7 +49,7 @@ export const features: Feature[] = [
     icon: CalendarDays,
     title: "For India & Abroad",
     description:
-      "Classes on any day except Sunday, with batch timings fixed to suit students in India and abroad.",
+      "Live online classes for students in India and abroad. Your class schedule is arranged with you after you enrol.",
   },
   {
     icon: Award,
@@ -61,8 +61,16 @@ export const features: Feature[] = [
     icon: HeartHandshake,
     title: "For Every Age",
     description:
-      "Swara Foundation for adults and Little Swaras for kids, in small batches or one-to-one.",
+      "Courses for children and adults, in small batches or one-to-one.",
   },
+];
+
+/** How classes are run (shown under the course list). Class format only: no course data, no fixed timings. */
+export const CLASS_DETAILS: readonly string[] = [
+  "Live online class on Google Meet, 1 hour, once a week",
+  "Small batches of up to 5 students",
+  "Class recordings shared privately with each student",
+  "Notations, lyrics and interactive self-learning widgets on your personal student dashboard",
 ];
 
 export const journey: JourneyStep[] = [

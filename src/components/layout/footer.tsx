@@ -23,7 +23,7 @@ const contactItems = [
   { icon: Mail, label: siteConfig.contact.email, href: `mailto:${siteConfig.contact.email}` },
   { icon: InstagramIcon, label: `Instagram ${social.instagram.handle}`, href: social.instagram.url },
   ...(social.youtubeUrl ? [{ icon: YouTubeIcon, label: "YouTube channel", href: social.youtubeUrl }] : []),
-  { icon: Phone, label: siteConfig.contact.phone, href: `tel:${siteConfig.contact.phone.replace(/\s/g, "")}` },
+  { icon: Phone, label: siteConfig.contact.phone, href: siteConfig.contact.phoneHref },
   { icon: MessageCircle, label: `WhatsApp ${siteConfig.contact.whatsapp}`, href: siteConfig.contact.whatsappUrl },
   { icon: MapPin, label: siteConfig.contact.address },
   { icon: Clock, label: siteConfig.contact.hours },

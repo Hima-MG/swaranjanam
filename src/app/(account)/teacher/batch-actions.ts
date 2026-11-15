@@ -72,7 +72,7 @@ export async function createBatch(input: BatchInput): Promise<ActionResult<{ bat
     if (Object.keys(parsed.errors).length) throw new AccessError("Please fix the highlighted fields.", parsed.errors);
     const [course, teacher] = await Promise.all([col("courses").doc(input.courseId as string).get().then(mapCourse), teacherFor(input?.teacherId)]);
     if (!course) throw new AccessError("Please fix the highlighted fields.", { courseId: "That course could not be found." });
-    if (!isBatchEligible(course)) throw new AccessError("Please fix the highlighted fields.", { courseId: "Batches can only be created for the academy's main courses." });
+    if (!isBatchEligible(course)) throw new AccessError("Please fix the highlighted fields.", { courseId: "Batches can only be created for a regular course that is not a draft. Publish the course first." });
     const batchId = await createBatchRecord(user, {
       name: parsed.name,
       course: { id: course.id, title: course.title },

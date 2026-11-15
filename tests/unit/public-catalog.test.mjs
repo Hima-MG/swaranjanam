@@ -1,11 +1,11 @@
 // Unit tests for the public "Courses & fees" catalogue: fees derived from the
-// billing rates in force, the approved-catalogue fallback, availability rules,
-// and that nothing private reaches the public site. Pure / static: no Firebase.
+// billing rates in force, Firestore-only courses (no hardcoded fallback),
+// availability rules, and that nothing private reaches the public site.
+// Pure / static: no Firebase.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { APPROVED_COURSES } from "../../src/data/approved-courses.ts";
 import { buildPublicCatalog } from "../../src/lib/catalog/public-catalog.ts";
 import { discounted, FEE_TERMS, publicFeesFromRate, SIBLING_DISCOUNT_ENABLED, SIBLING_DISCOUNT_PERCENT } from "../../src/lib/catalog/public-pricing.ts";
 import { DEFAULT_RATE_VERSION } from "../../src/lib/lms/class-billing.ts";
@@ -16,7 +16,7 @@ const FEES = publicFeesFromRate(DEFAULT_RATE_VERSION);
 function record(overrides = {}) {
   return {
     id: "c1", slug: "c1", title: "Course", titleMl: "", description: "Description", descriptionMl: "",
-    thumbnailUrl: null, thumbnailPublicId: null, status: "published", teacherIds: ["teacher-uid"], createdAt: null, updatedAt: null,
+    thumbnailUrl: null, thumbnailPublicId: null, coverUrl: null, coverPublicId: null, status: "published", teacherIds: ["teacher-uid"], createdAt: null, updatedAt: null,
     subtitle: "", subtitleMl: "", level: null, category: null, format: null, duration: "12 weeks", ageGroup: "", instructor: "",
     price: 4999, originalPrice: 6499, tag: null, featured: false, outcomes: [], outcomesMl: [], availability: "open",
     ...overrides,
@@ -52,53 +52,41 @@ describe("public fees come from the billing rates in force", () => {
   });
 });
 
-describe("approved catalogue (course details workbook)", () => {
-  test("Swara Foundation and Little Swaras are open; the four others are coming soon", () => {
-    const status = Object.fromEntries(APPROVED_COURSES.map((c) => [c.slug, c.availability]));
-    assert.deepEqual(status, {
-      "swara-foundation": "open",
-      "little-swaras": "open",
-      "devotional-songs": "coming_soon",
-      "voice-culture": "coming_soon",
-      "intermediate-level": "coming_soon",
-      "advanced-level": "coming_soon",
-    });
+describe("no hardcoded course catalogue", () => {
+  test("the approved-catalogue fallback and the course-creation scripts are gone", () => {
+    for (const f of ["src/data/approved-courses.ts", "src/data/before-first-class.ts", "scripts/create-main-courses.mjs", "scripts/migrate-courses.mjs", "scripts/legacy-catalogue.json"]) {
+      assert.throws(() => read(f), f);
+    }
   });
-  test("no fees, durations or unconfirmed details are stored in the approved catalogue", () => {
-    const src = read("src/data/approved-courses.ts").replace(/\/\/[^\n]*/g, "");
-    assert.doesNotMatch(src, /₹\s?\d|price|weeks|months|suggested|5–15/i);
+  test("public and dashboard code names no course and inserts none", () => {
+    const files = [
+      "src/lib/catalog/server.ts", "src/lib/catalog/public-catalog.ts", "src/lib/lms/academy-courses.ts", "src/app/(account)/teacher/courses/page.tsx",
+      "src/app/(public)/courses/[slug]/page.tsx", "src/components/home/hero.tsx", "src/components/home/courses-and-fees.tsx", "src/data/content.ts", "src/data/faq.ts",
+    ];
+    for (const f of files) {
+      const code = read(f).replace(/\/\/[^\n]*/g, "");
+      assert.doesNotMatch(code, /swara-foundation|little-swaras|Swara Foundation|Little Swaras|Sarali Varisai \(|devotional-songs|voice-culture/, f);
+    }
   });
 });
 
 describe("buildPublicCatalog", () => {
-  const build = (firestore = [], knownSlugs = new Set(firestore.map((e) => e.record.slug))) =>
-    buildPublicCatalog({ firestore, knownSlugs, approved: APPROVED_COURSES, fees: FEES });
+  const build = (firestore = []) => buildPublicCatalog({ firestore, fees: FEES });
 
-  test("empty database: the approved catalogue is shown, open courses first with the current fees", () => {
-    const list = build();
-    assert.deepEqual(list.map((c) => c.slug), ["swara-foundation", "little-swaras", "devotional-songs", "voice-culture", "intermediate-level", "advanced-level"]);
-    for (const c of list) {
-      assert.equal(c.source, "approved");
-      if (c.availability === "open") assert.deepEqual(c.fee, FEES);
-      else assert.equal(c.fee, null, `${c.slug}: coming soon → fees to be announced`);
-      assert.equal(c.duration, "", "no fixed duration advertised");
-    }
+  test("empty database: the public catalogue is empty (no sample courses)", () => {
+    assert.deepEqual(build(), []);
   });
 
-  test("a teacher's published course with the same slug replaces the approved entry (never duplicated)", () => {
-    const list = build([entry({ id: "abc", slug: "swara-foundation", title: "Swara Foundation (from Firestore)" })]);
-    const matches = list.filter((c) => c.slug === "swara-foundation");
-    assert.equal(matches.length, 1);
-    assert.equal(matches[0].source, "firestore");
-    assert.equal(matches[0].title, "Swara Foundation (from Firestore)");
-    assert.equal(new Set(list.map((c) => c.slug)).size, list.length);
+  test("published Firestore courses are listed, open first, with their fees", () => {
+    const list = build([entry({ id: "b", slug: "b-course", title: "B", availability: "coming_soon" }), entry({ id: "a", slug: "a-course", title: "A" })]);
+    assert.deepEqual(list.map((c) => c.slug), ["a-course", "b-course"]);
+    assert.ok(list.every((c) => c.source === "firestore"));
+    assert.deepEqual(list[0].fee, FEES);
+    assert.equal(list[1].fee, null);
   });
 
-  test("a draft or unpublished course with an approved slug hides that course (teacher decides)", () => {
-    const list = build([], new Set(["little-swaras"]));
-    assert.equal(list.some((c) => c.slug === "little-swaras"), false);
-    const listDraft = build([entry({ slug: "little-swaras", status: "draft" })]);
-    assert.equal(listDraft.some((c) => c.slug === "little-swaras"), false);
+  test("drafts and archived courses are never listed", () => {
+    assert.equal(build([entry({ status: "draft" }), entry({ id: "c3", slug: "c3", status: "archived" })]).length, 0);
   });
 
   test("a published course without an availability setting (unreviewed template content) is not listed", () => {
@@ -112,9 +100,10 @@ describe("buildPublicCatalog", () => {
     assert.deepEqual(list.find((c) => c.slug === "open-course").fee, FEES);
   });
 
-  test("nothing private or legacy reaches the public course object", () => {
-    const [course] = build([entry({ slug: "open-course" })]).filter((c) => c.slug === "open-course");
-    for (const key of ["price", "originalPrice", "teacherIds", "agreedFee", "status", "thumbnailPublicId"]) {
+  test("the cover image is public; nothing private or legacy reaches the public course object", () => {
+    const [course] = build([entry({ slug: "open-course", coverUrl: "https://res.cloudinary.com/x/image/upload/c.jpg", coverPublicId: "swaranjanam/courses/c1/covers/u" })]);
+    assert.equal(course.coverUrl, "https://res.cloudinary.com/x/image/upload/c.jpg");
+    for (const key of ["price", "originalPrice", "teacherIds", "agreedFee", "status", "thumbnailPublicId", "coverPublicId"]) {
       assert.equal(key in course, false, key);
     }
     assert.doesNotMatch(JSON.stringify(course), /4999|6499|teacher-uid/);

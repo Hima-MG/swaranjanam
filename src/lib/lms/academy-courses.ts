@@ -1,19 +1,13 @@
-// Academy-level courses vs. other course records. PURE: unit-tested, no I/O.
+// Course Management rules. PURE: unit-tested, no I/O.
 //
-// The academy runs two MAIN courses (approved catalogue, data/approved-courses.ts):
-//   * swara-foundation — Swara Foundation (Adults)
-//   * little-swaras    — Little Swaras (Kids)
-// Special Programmes (bhajan courses, workshops …) are course records with a
-// `programme` object. Every other course record — e.g. the topics imported
-// from the old static catalogue (Sarali Varisai, Janta Varisai, Alankaram,
-// Geetham …) — is a syllabus topic / legacy record: kept, but never shown as
-// a main course and never offered for new batches.
+// Every course is a Firestore record created by a teacher in the dashboard.
+// Nothing here names a real course: there is no hardcoded catalogue, and no
+// course slug is treated specially.
+//   * Regular Academy Courses: batch / individual classes billed monthly.
+//   * Special Programmes (bhajan courses, workshops …): course records with a
+//     `programme` object, paid once in full; they never have batches.
 
-import { APPROVED_COURSES, type ApprovedCourse } from "@/data/approved-courses";
-
-export const MAIN_COURSE_SLUGS = ["swara-foundation", "little-swaras"] as const;
-
-export type CourseGroup = "main" | "programme" | "other";
+export type CourseGroup = "regular" | "programme";
 
 interface Classifiable {
   id: string;
@@ -22,108 +16,109 @@ interface Classifiable {
   programme: unknown;
 }
 
-const isMainSlug = (slug: string) => (MAIN_COURSE_SLUGS as readonly string[]).includes(slug);
-
-export function courseGroup(course: Pick<Classifiable, "id" | "slug" | "programme">): CourseGroup {
-  if (isMainSlug(course.slug) || isMainSlug(course.id)) return "main";
-  if (course.programme) return "programme";
-  return "other";
-}
-
-/** The approved details of each main course (source for creating a missing one). */
-export function approvedMainCourses(approved: readonly ApprovedCourse[] = APPROVED_COURSES): ApprovedCourse[] {
-  return MAIN_COURSE_SLUGS.map((slug) => approved.find((a) => a.slug === slug)).filter((a): a is ApprovedCourse => Boolean(a));
+export function courseGroup(course: Pick<Classifiable, "programme">): CourseGroup {
+  return course.programme ? "programme" : "regular";
 }
 
 /**
- * Course Management grouping: main courses first (in MAIN_COURSE_SLUGS order),
- * then special programmes, then other records. `missingMain` lists approved
- * main courses that have no course record yet.
+ * Course Management grouping: regular courses first, then special programmes.
+ * Each group keeps the caller's order (newest first in the dashboard).
  */
-export function groupManagedCourses<T extends Pick<Classifiable, "id" | "slug" | "programme">>(courses: readonly T[], approved: readonly ApprovedCourse[] = APPROVED_COURSES) {
-  const main = courses.filter((c) => courseGroup(c) === "main");
-  const order = (c: T) => MAIN_COURSE_SLUGS.findIndex((s) => s === c.slug || s === c.id);
-  main.sort((a, b) => order(a) - order(b));
-  const present = new Set(main.flatMap((c) => [c.slug, c.id]));
+export function groupManagedCourses<T extends Pick<Classifiable, "programme">>(courses: readonly T[]) {
   return {
-    main,
+    regular: courses.filter((c) => courseGroup(c) === "regular"),
     programme: courses.filter((c) => courseGroup(c) === "programme"),
-    other: courses.filter((c) => courseGroup(c) === "other"),
-    missingMain: approvedMainCourses(approved).filter((a) => !present.has(a.slug)),
   };
 }
 
 /**
- * Courses a NEW batch may belong to: the main courses (not drafts). Special
- * programmes are paid once and have no billing account, and no programme has
- * batch scheduling, so none are offered. Existing batches keep their course.
+ * Courses a NEW batch may belong to: any regular course that is not a draft.
+ * Special programmes are paid once and have no billing account or batch
+ * scheduling, so none are offered. Existing batches keep their course.
  */
 export function isBatchEligible(course: Classifiable): boolean {
-  return course.status !== "draft" && courseGroup(course) === "main";
+  return course.status !== "draft" && courseGroup(course) === "regular";
 }
 
-/** "Choose a course" options for a new batch: eligible courses, main courses in their fixed order. */
+/** "Choose a course" options for a new batch: eligible courses, by title. */
 export function courseOptionsFrom(courses: readonly (Classifiable & { title: string })[]): { id: string; title: string }[] {
-  return groupManagedCourses(courses.filter(isBatchEligible), []).main.map((c) => ({ id: c.id, title: c.title }));
+  return courses
+    .filter(isBatchEligible)
+    .map((c) => ({ id: c.id, title: c.title || c.slug || c.id }))
+    .sort((a, b) => a.title.localeCompare(b.title));
 }
 
-/**
- * Plan for creating the missing main courses without duplicates: an approved
- * main course is created only if no existing record has its slug as id or
- * slug, and none has the same title (case-insensitive).
- */
-export function planMainCourseCreation(
-  existing: readonly { id: string; slug?: string | null; title?: string | null }[],
-  approved: readonly ApprovedCourse[] = APPROVED_COURSES,
-): { create: ApprovedCourse[]; skip: { slug: string; reason: string }[] } {
-  const create: ApprovedCourse[] = [];
-  const skip: { slug: string; reason: string }[] = [];
-  for (const a of approvedMainCourses(approved)) {
-    const clash = existing.find(
-      (e) => e.id === a.slug || e.slug === a.slug || (e.title ?? "").trim().toLowerCase() === a.title.trim().toLowerCase(),
-    );
-    if (clash) skip.push({ slug: a.slug, reason: `already exists as courses/${clash.id}` });
-    else create.push(a);
-  }
-  return { create, skip };
-}
+// --- Course deletion -----------------------------------------------------------------------------
 
 /**
- * Firestore fields for a new main course record, taken ONLY from the approved
- * catalogue entry and matching exactly what the public site shows for it today
- * (published, same availability; no stored pricing, so the academy's confirmed
- * rates still apply). Timestamps are added by the caller.
+ * Records that tie a course to students or money. Any of them means the
+ * course has history that must be kept (attendance, invoices, payments,
+ * receipts): it is archived instead of deleted.
  */
-export function mainCourseFields(a: ApprovedCourse) {
+export interface CourseUsage {
+  enrollments: number;
+  batches: number;
+  registrations: number;
+  billingAccounts: number;
+  payments: number;
+  packages: number;
+  submissions: number;
+  reviews: number;
+}
+
+export type CourseDeletion = { kind: "blocked"; reason: string } | { kind: "delete" };
+
+const USAGE_LABELS: Record<keyof CourseUsage, [string, string]> = {
+  enrollments: ["student enrolment", "student enrolments"],
+  batches: ["batch", "batches"],
+  registrations: ["registration", "registrations"],
+  billingAccounts: ["billing account", "billing accounts"],
+  payments: ["payment record", "payment records"],
+  packages: ["package", "packages"],
+  submissions: ["practice submission", "practice submissions"],
+  reviews: ["review", "reviews"],
+};
+
+/**
+ * What "Delete course" may do. A course that was never used by a student
+ * (no enrolments, batches, registrations, billing accounts, payments,
+ * packages, submissions or reviews — classes and invoices hang off batches
+ * and billing accounts) is deleted with its modules, lessons and uploaded
+ * media. Anything else is refused with the reason, and the teacher is pointed
+ * to Archive, which keeps every student and payment record intact.
+ */
+export function courseDeletionPlan(usage: CourseUsage): CourseDeletion {
+  const used = (Object.keys(USAGE_LABELS) as (keyof CourseUsage)[])
+    .filter((key) => usage[key] > 0)
+    .map((key) => `${usage[key]} ${USAGE_LABELS[key][usage[key] === 1 ? 0 : 1]}`);
+  if (used.length === 0) return { kind: "delete" };
   return {
-    id: a.slug,
-    slug: a.slug,
-    title: a.title,
-    titleMl: "",
-    description: a.description,
-    descriptionMl: "",
-    thumbnailUrl: null,
-    thumbnailPublicId: null,
-    subtitle: a.subtitle,
-    subtitleMl: "",
-    level: a.level,
-    category: a.category,
-    format: "Live Online",
-    duration: "",
-    ageGroup: a.audience,
-    instructor: "",
-    price: null,
-    originalPrice: null,
-    tag: null,
-    featured: a.featured,
-    outcomes: [...a.content],
-    outcomesMl: [],
-    prerequisites: [],
-    availability: a.availability,
-    status: "published",
-    teacherIds: [] as string[],
-    createdFrom: "approved-catalogue",
+    kind: "blocked",
+    reason: `This course cannot be deleted because it has ${used.join(", ")}. Archive it instead: archiving hides it from the website and keeps every student and payment record.`,
   };
+}
+
+/**
+ * Cloudinary assets a course OWNS: only files inside the course's own upload
+ * folder (`<root>/courses/<courseId>/`). Uploads are never shared between
+ * courses (duplicating a course does not copy uploaded files), so these can be
+ * deleted with the course without breaking any other record.
+ */
+export function ownedAssets(
+  courseFolder: string,
+  assets: readonly { publicId: string | null | undefined; resourceType: string | null | undefined }[],
+): { publicId: string; resourceType: "image" | "video" | "raw" }[] {
+  const prefix = `${courseFolder.replace(/\/+$/, "")}/`;
+  const seen = new Set<string>();
+  const owned: { publicId: string; resourceType: "image" | "video" | "raw" }[] = [];
+  for (const a of assets) {
+    if (!a.publicId || !a.publicId.startsWith(prefix)) continue;
+    if (a.resourceType !== "image" && a.resourceType !== "video" && a.resourceType !== "raw") continue;
+    if (seen.has(a.publicId)) continue;
+    seen.add(a.publicId);
+    owned.push({ publicId: a.publicId, resourceType: a.resourceType });
+  }
+  return owned;
 }
 
 // --- Batch deletion ----------------------------------------------------------------------------

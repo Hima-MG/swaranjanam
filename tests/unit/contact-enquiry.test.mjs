@@ -39,8 +39,8 @@ describe("prefilled links", () => {
   const { value } = parseEnquiry(valid);
 
   test("WhatsApp link uses the configured click-to-chat URL with the text encoded", () => {
-    const url = whatsappEnquiryUrl("https://wa.me/918547545175", value);
-    assert.ok(url.startsWith("https://wa.me/918547545175?text="));
+    const url = whatsappEnquiryUrl("https://wa.me/917909150030", value);
+    assert.ok(url.startsWith("https://wa.me/917909150030?text="));
     const text = decodeURIComponent(new URL(url).searchParams.get("text"));
     assert.equal(text, enquiryText(value));
     assert.match(text, /Name: Lakshmi Menon/);
@@ -49,7 +49,7 @@ describe("prefilled links", () => {
 
   test("special characters cannot break out of the text parameter", () => {
     const { value: tricky } = parseEnquiry({ ...valid, message: "A&B=1?#x\nnext line" });
-    const url = new URL(whatsappEnquiryUrl("https://wa.me/918547545175", tricky));
+    const url = new URL(whatsappEnquiryUrl("https://wa.me/917909150030", tricky));
     assert.equal([...url.searchParams.keys()].join(","), "text");
     assert.match(url.searchParams.get("text"), /A&B=1\?#x\nnext line/);
   });

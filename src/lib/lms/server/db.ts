@@ -149,6 +149,8 @@ export function mapCourse(snapshot: DocumentSnapshot<DocumentData>): CourseRecor
     descriptionMl: str(data.descriptionMl),
     thumbnailUrl: str(data.thumbnailUrl) || null,
     thumbnailPublicId: str(data.thumbnailPublicId) || null,
+    coverUrl: str(data.coverUrl) || null,
+    coverPublicId: str(data.coverPublicId) || null,
     status: oneOf(COURSE_STATUSES, data.status, "draft"),
     teacherIds: Array.isArray(data.teacherIds) ? data.teacherIds.filter((id): id is string => typeof id === "string") : [],
     storedPricing: data.pricing && typeof data.pricing === "object" ? (data.pricing as Record<string, unknown>) : null,
@@ -185,7 +187,8 @@ function mapResource(raw: unknown): LessonResource | null {
     source: r.source === "external" ? "external" : "cloudinary",
     url: str(r.url),
     publicId: str(r.publicId) || null,
-    cloudinaryResourceType: r.cloudinaryResourceType === "video" ? "video" : r.cloudinaryResourceType === "image" ? "image" : null,
+    cloudinaryResourceType:
+      r.cloudinaryResourceType === "video" || r.cloudinaryResourceType === "image" || r.cloudinaryResourceType === "raw" ? r.cloudinaryResourceType : null,
     fileName: str(r.fileName) || null,
     format: str(r.format) || null,
     bytes: typeof r.bytes === "number" ? r.bytes : null,

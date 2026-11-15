@@ -68,6 +68,13 @@ function Media({ resource }: { resource: LessonResource }) {
           </p>
         </object>
       );
+    case "document":
+      return (
+        <p className="rounded-xl border border-dashed border-border bg-ivory p-4 text-sm text-muted-foreground">
+          {resource.fileName ?? "Document"}
+          {resource.format ? ` · ${resource.format.toUpperCase()}` : ""} — download to open it.
+        </p>
+      );
     case "image":
       return (
         <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-border bg-ivory">

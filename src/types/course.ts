@@ -48,6 +48,8 @@ export interface Course {
   description: string;
   descriptionMl: string;
   thumbnailUrl: string | null;
+  /** Optional wide banner shown at the top of the public course page. */
+  coverUrl: string | null;
   level: CourseLevel | null;
   category: CourseCategory | null;
   format: CourseFormat | null;
@@ -67,8 +69,8 @@ export interface Course {
   programme: PublicProgramme | null;
   /** What learners should already know (public). */
   prerequisites: string[];
-  /** "approved" = the academy's approved catalogue, used until the course exists in Firestore. */
-  source: "firestore" | "approved";
+  /** Every public course comes from Firestore (there is no hardcoded catalogue). */
+  source: "firestore";
   tag: CourseTag | null;
   featured: boolean;
   outcomes: string[];

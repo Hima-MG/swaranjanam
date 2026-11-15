@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
-import { UPLOAD_RULES, type UploadKind } from "@/lib/media/config";
+import { fileExtension, UPLOAD_RULES, type CloudinaryResourceType, type UploadKind } from "@/lib/media/config";
 
 // Signed, direct-from-browser uploads to Cloudinary.
 //
@@ -76,9 +76,12 @@ export interface UploadTicket {
   uploadUrl: string;
   fields: Record<string, string>;
   publicId: string;
-  resourceType: "image" | "video";
+  resourceType: CloudinaryResourceType;
   maxBytes: number;
 }
+
+/** What a course upload is for; each has its own sub-folder of the course folder. */
+export type CoursePurpose = "thumbnail" | "cover" | "resource";
 
 /** Folder for one student's practice submissions. */
 export function submissionFolder(studentId: string): string {
@@ -87,13 +90,26 @@ export function submissionFolder(studentId: string): string {
 }
 
 /**
+ * Raw files (documents) keep their extension in the public id, so the
+ * delivery URL ends in ".docx" etc. and opens in the right app. The extension
+ * must be one the rule allows.
+ */
+function rawSuffix(kind: UploadKind, fileName: string | undefined): string {
+  const rule = UPLOAD_RULES[kind];
+  if (rule.resourceType !== "raw") return "";
+  const ext = fileExtension(fileName ?? "");
+  if (!rule.formats.includes(ext)) throw new MediaValidationError(`Unsupported file type. Please choose a ${rule.label}.`);
+  return `.${ext}`;
+}
+
+/**
  * Signs a single upload into `prefix` (a folder ending in "/"). Signatures are
  * valid for one hour (Cloudinary rejects older timestamps).
  */
-function ticketFor(prefix: string, kind: UploadKind): UploadTicket {
+function ticketFor(prefix: string, kind: UploadKind, fileName?: string): UploadTicket {
   const { cloudName, apiKey, apiSecret } = readConfig();
   const rule = UPLOAD_RULES[kind];
-  const publicId = `${prefix}${randomUUID()}`;
+  const publicId = `${prefix}${randomUUID()}${rawSuffix(kind, fileName)}`;
   const params = {
     public_id: publicId,
     timestamp: Math.floor(Date.now() / 1000),
@@ -117,8 +133,8 @@ function ticketFor(prefix: string, kind: UploadKind): UploadTicket {
 }
 
 /** Course media. Callers must have already authorised the teacher for `courseId`. */
-export function createUploadTicket(courseId: string, kind: UploadKind, purpose: "thumbnail" | "resource"): UploadTicket {
-  return ticketFor(`${courseFolder(courseId)}/${purpose}s/`, kind);
+export function createUploadTicket(courseId: string, kind: UploadKind, purpose: CoursePurpose, fileName?: string): UploadTicket {
+  return ticketFor(`${courseFolder(courseId)}/${purpose}s/`, kind, fileName);
 }
 
 /** A student's practice recording. Callers must have authorised the student for the course. */
@@ -135,7 +151,7 @@ export interface UploadReceipt {
 
 export interface VerifiedAsset {
   publicId: string;
-  resourceType: "image" | "video";
+  resourceType: CloudinaryResourceType;
   url: string;
   format: string;
   bytes: number;
@@ -152,7 +168,7 @@ function adminAuthHeader(apiKey: string, apiSecret: string) {
 export function verifyUploadedAsset(
   courseId: string,
   kind: UploadKind,
-  purpose: "thumbnail" | "resource",
+  purpose: CoursePurpose,
   receipt: UploadReceipt,
 ): Promise<VerifiedAsset> {
   return verifyInFolder(`${courseFolder(courseId)}/${purpose}s/`, kind, receipt);
@@ -167,10 +183,15 @@ async function verifyInFolder(expectedPrefix: string, kind: UploadKind, receipt:
   const { cloudName, apiKey, apiSecret } = readConfig();
   const rule = UPLOAD_RULES[kind];
 
+  // Raw files carry ".<ext>" after the server-chosen id; nothing else may follow.
+  const rawExt = rule.resourceType === "raw" && typeof receipt.publicId === "string" ? fileExtension(receipt.publicId) : "";
+  const segment = typeof receipt.publicId === "string" ? receipt.publicId.slice(expectedPrefix.length) : "";
+  const idPart = rawExt ? segment.slice(0, -(rawExt.length + 1)) : segment;
   if (
     typeof receipt.publicId !== "string" ||
     !receipt.publicId.startsWith(expectedPrefix) ||
-    !SAFE_SEGMENT.test(receipt.publicId.slice(expectedPrefix.length)) ||
+    !SAFE_SEGMENT.test(idPart) ||
+    (rule.resourceType === "raw" && !rule.formats.includes(rawExt)) ||
     !Number.isSafeInteger(receipt.version) ||
     typeof receipt.signature !== "string"
   ) {
@@ -207,7 +228,8 @@ async function verifyInFolder(expectedPrefix: string, kind: UploadKind, receipt:
     is_audio?: boolean;
   };
 
-  const format = (asset.format ?? "").toLowerCase();
+  // Raw assets have no detected format: their extension is part of the public id.
+  const format = (rule.resourceType === "raw" ? fileExtension(asset.public_id) : (asset.format ?? "")).toLowerCase();
   let problem: string | null = null;
   if (asset.resource_type !== rule.resourceType || !rule.formats.includes(format)) {
     problem = `Unsupported file type. Please upload a ${rule.label}.`;
@@ -234,7 +256,7 @@ async function verifyInFolder(expectedPrefix: string, kind: UploadKind, receipt:
  * Deletes an asset. Best effort: failures are logged (without secrets) and
  * swallowed, so a Cloudinary outage never blocks removing a lesson resource.
  */
-export async function deleteAsset(publicId: string, resourceType: "image" | "video"): Promise<void> {
+export async function deleteAsset(publicId: string, resourceType: CloudinaryResourceType): Promise<void> {
   try {
     const { cloudName, apiKey, apiSecret } = readConfig();
     const params = { public_id: publicId, timestamp: Math.floor(Date.now() / 1000), invalidate: "true" };

@@ -47,7 +47,7 @@ export function EnquiryForm({
   email,
   courseSelect,
 }: {
-  /** The academy's click-to-chat URL from site config, e.g. https://wa.me/918547545175 */
+  /** The academy's click-to-chat URL from site config, e.g. https://wa.me/917909150030 */
   whatsappUrl: string;
   email: string;
   /** The "Interested in" select (named `course`), rendered on the server. */

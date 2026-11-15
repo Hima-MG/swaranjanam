@@ -544,7 +544,7 @@ export async function listTeachers(user: SessionUser) {
   return snap.docs.map((d) => ({ uid: d.id, label: str(d.get("displayName")) ?? str(d.get("email")) ?? d.id }));
 }
 
-/** Courses a new batch can belong to: the academy's main courses (lib/lms/academy-courses.ts). */
+/** Courses a new batch can belong to: published or archived regular courses (lib/lms/academy-courses.ts). */
 export async function listCourseOptions(user: SessionUser) {
   if (user.role !== "teacher") throw new Error("Teacher role required");
   const snap = await col("courses").select("title", "slug", "status", "programme").get();

@@ -54,7 +54,7 @@ export function Hero() {
       <Container className="grid items-center gap-14 py-14 sm:py-20 lg:grid-cols-[1.1fr_1fr] lg:gap-20 lg:py-24">
         <div className="flex flex-col items-start gap-7">
           <Badge variant="gold" className="h-7 px-3.5">
-            Admissions open · Swara Foundation &amp; Little Swaras
+            Admissions open · Live online classes
           </Badge>
           <p className="font-heading text-xl text-maroon italic sm:text-2xl">{siteConfig.motto}</p>
           <h1 className="type-display text-brown">
