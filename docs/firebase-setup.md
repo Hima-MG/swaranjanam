@@ -130,29 +130,18 @@ dashboard. The public `/courses` pages show **published** courses only, read
 through `src/lib/catalog/server.ts`. They are cached for up to an hour and
 refreshed immediately whenever a teacher saves a change.
 
-### One-off import of the former static catalogue
+### Starting from an empty catalogue
 
-The ten courses that used to be hardcoded in `src/data/courses.ts` are kept in
-`scripts/legacy-catalogue.json` purely as input for a one-off import:
+There is no hardcoded or sample course data, and nothing inserts courses
+automatically. With zero courses the teacher dashboard shows "No courses have
+been added yet." and the public site shows an empty state. Create courses in
+**Teacher → Course management → New course**, add modules and lessons, set the
+catalogue details (including the public enrolment status) and publish.
 
-```bash
-npm run migrate:courses -- --dry-run
-npm run migrate:courses -- --teacher=owner@example.com
-```
-
-- Course documents use the existing slug as their id, so `/courses/<slug>`
-  URLs keep working. Modules and lessons get deterministic ids
-  (`<slug>--m1`, `<slug>--m1--l1`).
-- Courses are imported as **published** (they were public before); add
-  `--status=draft` to import them hidden.
-- Re-running never duplicates or overwrites anything: existing courses are
-  left alone, except that catalogue fields still *missing* on imported
-  courses are filled in, and `--teacher` adds that teacher to each course.
-- The old sample ratings and student counts are stored under `legacy` for the
-  record but are not shown on the site.
-- After the import is verified, delete `scripts/legacy-catalogue.json` (and
-  optionally the script). From then on, all course changes are made in the
-  teacher dashboard.
+Course records imported earlier from the old static catalogue (e.g. "Sarali
+Varisai", "Basics for Beginners") may still exist in Firestore. They are listed
+in Course management like any other course: delete the ones without students,
+and archive the rest.
 
 ## 5. Cloudinary
 

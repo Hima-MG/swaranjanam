@@ -642,8 +642,8 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
   const write = (slug, data) =>
     db.collection("courses").doc(id(slug)).set({ id: id(slug), slug, title: slug, description: "", status: "published", teacherIds: [teacher.uid], ...data });
 
-  test("only reviewed published courses are listed; approved catalogue fills the gaps; fees come from the billing rates", async () => {
-    // Unreviewed template course (published, no availability) and a draft that owns an approved slug.
+  test("only reviewed published Firestore courses are listed (no hardcoded fallback); fees come from the billing rates", async () => {
+    // Unreviewed template course (published, no availability) and a draft.
     await write(`template-${run}`, { availability: null, price: 4999, tag: "Bestseller" });
     await write("little-swaras", { status: "draft", availability: "open" });
     // A teacher-managed open course and a coming-soon course.
@@ -655,15 +655,17 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
     assert.equal(result.ok, true);
     const bySlug = new Map(result.data.map((c) => [c.slug, c]));
     assert.equal(bySlug.has(`template-${run}`), false, "unreviewed template course hidden");
-    assert.equal(bySlug.has("little-swaras"), false, "a draft with an approved slug is not replaced by the fallback");
-    assert.equal(bySlug.get("swara-foundation")?.source, "approved", "approved fallback shown");
+    assert.equal(bySlug.has("little-swaras"), false, "drafts are never listed");
+    assert.equal(bySlug.has("swara-foundation"), false, "no hardcoded fallback course");
+    assert.ok(result.data.every((c) => c.source === "firestore"));
     assert.deepEqual(bySlug.get(`teacher-open-${run}`)?.fee, { batchMinor: 40_000, individualMinor: 75_000, sharedBatchMinor: 36_000, sharedIndividualMinor: 70_000, batchAdvanceMinor: 40_000, siblingDiscount: null });
     assert.equal(bySlug.get(`teacher-soon-${run}`)?.fee, null);
     assert.doesNotMatch(JSON.stringify(result.data), /9999|4999|teacher-1/, "no legacy price or teacher ids");
-    assert.deepEqual(await getPublicFees(), bySlug.get("swara-foundation").fee);
+    assert.deepEqual(await getPublicFees(), bySlug.get(`teacher-open-${run}`).fee);
 
-    // Detail pages: approved fallback resolves; unreviewed and draft courses do not.
-    assert.equal((await getPublishedCourseBySlug("swara-foundation")).data?.title, "Swara Foundation (Adults)");
+    // Detail pages: only listed Firestore courses resolve; unknown, unreviewed and draft courses do not.
+    assert.equal((await getPublishedCourseBySlug(`teacher-open-${run}`)).data?.title, "Teacher course");
+    assert.equal((await getPublishedCourseBySlug("swara-foundation")).data, null);
     assert.equal((await getPublishedCourseBySlug(`template-${run}`)).data, null);
     assert.equal((await getPublishedCourseBySlug("little-swaras")).data, null);
   });
@@ -783,7 +785,8 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
   test("course selection: coming-soon, unknown, teacher and invalid class-type registrations are refused; nothing is created", async () => {
     const { saveRegistration } = await regs();
     await assert.rejects(saveRegistration(student("rg-g0"), { slug: `soon-course-${run}`, mode: "batch", details: details() }, NOW), /coming soon/);
-    await assert.rejects(saveRegistration(student("rg-g0"), { slug: "voice-culture", mode: "batch", details: details() }, NOW), /coming soon/);
+    // No hardcoded catalogue: a slug that is not a Firestore course does not exist.
+    await assert.rejects(saveRegistration(student("rg-g0"), { slug: "voice-culture", mode: "batch", details: details() }, NOW), /could not be found/);
     await assert.rejects(saveRegistration(student("rg-g0"), { slug: "no-such-course", mode: "batch", details: details() }, NOW), /could not be found/);
     await assert.rejects(saveRegistration({ ...student("t0"), role: "teacher" }, { slug: enrolSlug, mode: "batch", details: details() }, NOW), /Only student/);
     await assert.rejects(saveRegistration(student("rg-g0"), { slug: enrolSlug, mode: "monthly-package", details: details() }, NOW), /highlighted/);

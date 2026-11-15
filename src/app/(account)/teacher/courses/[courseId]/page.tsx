@@ -8,6 +8,7 @@ import { CourseCatalogForm } from "@/components/lms/teacher/course-catalog-form"
 import { CourseDetailsForm } from "@/components/lms/teacher/course-details-form";
 import { CoursePricingForm, CourseScheduleInfoForm, EnrolledRateChangeForm } from "@/components/lms/teacher/course-pricing-form";
 import { CourseStatusControl } from "@/components/lms/teacher/course-status-control";
+import { DeleteCourseDialog } from "@/components/lms/teacher/delete-course-dialog";
 import { DuplicateCourseButton } from "@/components/lms/teacher/duplicate-course-button";
 import { OutlineEditor } from "@/components/lms/teacher/outline-editor";
 import { ProgrammeForm } from "@/components/lms/teacher/programme-form";
@@ -91,9 +92,15 @@ async function CourseEditor({ params }: { params: Params }) {
           </h2>
           <CourseDetailsForm course={course} />
         </div>
-        <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-soft">
-          <h2 className="type-h3">Thumbnail</h2>
-          <ThumbnailUploader courseId={course.id} title={course.title} thumbnailUrl={course.thumbnailUrl} />
+        <div className="flex flex-col gap-8 rounded-2xl border border-border bg-card p-6 shadow-soft">
+          <div className="flex flex-col gap-4">
+            <h2 className="type-h3">Thumbnail</h2>
+            <ThumbnailUploader courseId={course.id} title={course.title} thumbnailUrl={course.thumbnailUrl} />
+          </div>
+          <div className="flex flex-col gap-4 border-t border-border pt-6">
+            <h2 className="type-h3">Cover image</h2>
+            <ThumbnailUploader courseId={course.id} title={course.title} thumbnailUrl={course.coverUrl} image="cover" />
+          </div>
         </div>
       </section>
 
@@ -206,10 +213,23 @@ async function CourseEditor({ params }: { params: Params }) {
             Curriculum
           </h2>
           <p className="text-sm text-muted-foreground">
-            Organise modules and lessons. Open a lesson to add English and Malayalam videos, audio and PDFs.
+            Organise modules and lessons. Open a lesson to add English and Malayalam videos, audio, PDF notes, documents and images.
           </p>
         </div>
         <OutlineEditor courseId={course.id} outline={outline} />
+      </section>
+
+      <section aria-labelledby="danger-zone" className="flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-6">
+        <h2 id="danger-zone" className="type-h3">
+          Delete course
+        </h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Permanently removes this course, its modules, lessons and uploaded files. Only possible while no student has enrolled, registered or paid
+          for it. To retire a course that has students, use Archive above instead.
+        </p>
+        <div>
+          <DeleteCourseDialog courseId={course.id} title={course.title} />
+        </div>
       </section>
     </div>
   );

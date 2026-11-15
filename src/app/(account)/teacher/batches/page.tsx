@@ -20,7 +20,7 @@ async function Batches() {
       <div className="flex flex-wrap items-center justify-end gap-3">
         {courses.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            New batches need a main course (Swara Foundation or Little Swaras). Set them up in Courses first.
+            New batches need a published regular course. Create and publish one in Course management first.
           </p>
         )}
         <BatchFormDialog courses={courses} teachers={teachers} maxCapacity={MAX_BATCH_CAPACITY} />

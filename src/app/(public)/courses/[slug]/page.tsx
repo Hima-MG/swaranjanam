@@ -1,5 +1,6 @@
 import { BookOpen, CalendarClock, ChevronRight, MonitorPlay, Users, UsersRound } from "lucide-react";
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -17,16 +18,14 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { FEE_TERMS } from "@/lib/catalog/public-pricing";
 import { PROGRAMME_TYPE_LABELS } from "@/lib/lms/programme";
 import { getPublishedCourseBySlug, getPublishedCourses, relatedCourses } from "@/lib/catalog/server";
-import { BEFORE_FIRST_CLASS, CLASS_STRUCTURE, WORKBOOK_FOUNDATION_SLUGS } from "@/data/before-first-class";
 import { formatMoney } from "@/lib/format";
 import { COURSE_AVAILABILITY_LABELS } from "@/types/course";
 
 // Course pages are rendered on first visit (behind loading.tsx) and cached
 // under the catalogue tag; teacher changes refresh them. Only publicly listed
-// courses resolve (published with an availability set, or the academy's
-// approved catalogue until the course exists in Firestore); others return 404.
-// Fees are the academy's current per-session rates — the same figures as the
-// homepage "Courses & fees" section.
+// Firestore courses resolve (published with an availability set); others
+// return 404. Fees are the course's own per-session rates — the same figures
+// as the homepage "Courses & fees" section.
 
 export async function generateMetadata({ params }: PageProps<"/courses/[slug]">): Promise<Metadata> {
   const { slug } = await params;
@@ -72,6 +71,11 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
 
   return (
     <>
+      {course.coverUrl && (
+        <div className="relative aspect-[3/1] max-h-[22rem] w-full overflow-hidden bg-maroon-deep sm:aspect-[4/1]">
+          <Image src={course.coverUrl} alt="" fill priority sizes="100vw" className="object-cover" />
+        </div>
+      )}
       <section className="relative isolate border-b border-border bg-cream-deep/70 pattern-kolam-gold">
         <Container className="grid gap-10 py-12 sm:py-16 lg:grid-cols-[1fr_380px] lg:gap-14 lg:pb-24">
           <div className="flex flex-col gap-5">
@@ -189,43 +193,6 @@ export default async function CourseDetailPage({ params }: PageProps<"/courses/[
                 {course.prerequisites.map((p) => (
                   <li key={p} className="before:mr-2 before:text-gold before:content-['•']">
                     {p}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {open && WORKBOOK_FOUNDATION_SLUGS.includes(course.slug) && (
-            <section aria-labelledby="class-structure" className="flex flex-col gap-3">
-              <h2 id="class-structure" className="type-h2">
-                What happens in each class
-              </h2>
-              <p className="text-brown">{CLASS_STRUCTURE}</p>
-            </section>
-          )}
-
-          {open && WORKBOOK_FOUNDATION_SLUGS.includes(course.slug) && (
-            <section aria-labelledby="before-first-class" className="flex flex-col gap-4">
-              <h2 id="before-first-class" className="type-h2">
-                Before your first class
-              </h2>
-              <ul className="flex flex-col gap-4">
-                {BEFORE_FIRST_CLASS.map((b) => (
-                  <li key={b.item} className="rounded-2xl border border-border bg-card p-5 shadow-soft">
-                    <h3 className="font-semibold text-brown">{b.item}</h3>
-                    <p className="mt-1 text-brown">{b.details}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {b.how}
-                      {b.link && (
-                        <>
-                          {" · "}
-                          <a href={b.link} target="_blank" rel="noopener noreferrer" className="font-medium text-maroon hover:underline">
-                            More details
-                            <span className="sr-only"> (opens in a new tab)</span>
-                          </a>
-                        </>
-                      )}
-                    </p>
                   </li>
                 ))}
               </ul>

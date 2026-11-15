@@ -15,16 +15,20 @@ import {
   requireActionUser,
   runAction,
 } from "@/lib/lms/server/access";
+import { courseDeletionPlan, ownedAssets, type CourseUsage } from "@/lib/lms/academy-courses";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { col, db, mapLesson, mapModule } from "@/lib/lms/server/db";
 import {
+  courseFolder,
   createUploadTicket,
   deleteAsset,
+  MediaConfigError,
   verifyUploadedAsset,
   type UploadReceipt,
   type UploadTicket,
 } from "@/lib/media/cloudinary";
-import { toApprovedVideoEmbed, type UploadKind } from "@/lib/media/config";
+import { isDownloadableKind, toApprovedVideoEmbed, type UploadKind } from "@/lib/media/config";
+import { COURSE_CATEGORIES, COURSE_LEVELS, type CourseCategory, type CourseLevel } from "@/types/course";
 import {
   COURSE_STATUSES,
   DEFAULT_CURRENCY,
@@ -119,10 +123,25 @@ const EMPTY_CATALOG_FIELDS = {
   availability: null,
 };
 
+/** Optional choice from a fixed list: "" = not set; anything else must be listed. */
+function optionalChoice<T extends string>(values: readonly T[], value: unknown, field: string, errors: Record<string, string>): T | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (values.includes(value as T)) return value as T;
+  errors[field] = "Choose an option from the list.";
+  return null;
+}
+
 export async function createCourse(input: unknown): Promise<ActionResult<{ courseId: string }>> {
   return runAction("createCourse", async () => {
     const user = await requireActionUser("teacher");
-    const text = parseText(input);
+    const raw = (input ?? {}) as Record<string, unknown>;
+    const choiceErrors: Record<string, string> = {};
+    const category = optionalChoice<CourseCategory>(COURSE_CATEGORIES, raw.category, "category", choiceErrors);
+    const level = optionalChoice<CourseLevel>(COURSE_LEVELS, raw.level, "level", choiceErrors);
+    const { value: text, errors } = parseBilingualText(raw);
+    if (Object.keys(errors).length > 0 || Object.keys(choiceErrors).length > 0) {
+      throw new AccessError("Please fix the highlighted fields.", { ...errors, ...choiceErrors });
+    }
     const ref = col("courses").doc();
     await ref.create({
       id: ref.id,
@@ -130,7 +149,14 @@ export async function createCourse(input: unknown): Promise<ActionResult<{ cours
       ...text,
       thumbnailUrl: null,
       thumbnailPublicId: null,
+      coverUrl: null,
+      coverPublicId: null,
       ...EMPTY_CATALOG_FIELDS,
+      category,
+      level,
+      // A new course is a draft (never public). Once published it is open for
+      // enrolment unless the teacher picks another status in Catalogue details.
+      availability: "open",
       status: "draft" satisfies CourseStatus,
       teacherIds: [user.uid],
       createdBy: user.uid,
@@ -246,6 +272,8 @@ export async function duplicateCourse(courseId: string): Promise<ActionResult<{ 
         status: "draft" satisfies CourseStatus,
         thumbnailUrl: null,
         thumbnailPublicId: null,
+        coverUrl: null,
+        coverPublicId: null,
         featured: false,
         teacherIds: [user.uid],
         createdBy: user.uid,
@@ -306,45 +334,128 @@ export async function duplicateCourse(courseId: string): Promise<ActionResult<{ 
   });
 }
 
-// --- Thumbnails ---------------------------------------------------------------
+// --- Course images (thumbnail and cover) -----------------------------------------
 
-export async function createThumbnailUpload(courseId: string): Promise<ActionResult<UploadTicket>> {
-  return runAction("createThumbnailUpload", async () => {
+type CourseImage = "thumbnail" | "cover";
+
+const IMAGE_FIELDS: Record<CourseImage, { url: "thumbnailUrl" | "coverUrl"; publicId: "thumbnailPublicId" | "coverPublicId" }> = {
+  thumbnail: { url: "thumbnailUrl", publicId: "thumbnailPublicId" },
+  cover: { url: "coverUrl", publicId: "coverPublicId" },
+};
+
+function parseImage(value: unknown): CourseImage {
+  if (value !== "thumbnail" && value !== "cover") throw new AccessError("Unknown image.");
+  return value;
+}
+
+export async function createCourseImageUpload(courseId: string, image: unknown): Promise<ActionResult<UploadTicket>> {
+  return runAction("createCourseImageUpload", async () => {
     const { course } = await authorizeTeacherForCourse(courseId);
-    return createUploadTicket(course.id, "image", "thumbnail");
+    return createUploadTicket(course.id, "image", parseImage(image));
   });
 }
 
-export async function saveCourseThumbnail(courseId: string, receipt: UploadReceipt): Promise<ActionResult> {
-  return runAction("saveCourseThumbnail", async () => {
+/** Verifies the upload with Cloudinary, saves its URL, then deletes the image it replaced. */
+export async function saveCourseImage(courseId: string, image: unknown, receipt: UploadReceipt): Promise<ActionResult> {
+  return runAction("saveCourseImage", async () => {
     const { course } = await authorizeTeacherForCourse(courseId);
-    const asset = await verifyUploadedAsset(course.id, "image", "thumbnail", receipt);
-    await col("courses").doc(course.id).update({
-      thumbnailUrl: asset.url,
-      thumbnailPublicId: asset.publicId,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    if (course.thumbnailPublicId && course.thumbnailPublicId !== asset.publicId) {
-      await deleteAsset(course.thumbnailPublicId, "image");
+    const which = parseImage(image);
+    const fields = IMAGE_FIELDS[which];
+    const asset = await verifyUploadedAsset(course.id, "image", which, receipt);
+    try {
+      await col("courses").doc(course.id).update({
+        [fields.url]: asset.url,
+        [fields.publicId]: asset.publicId,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      await deleteAsset(asset.publicId, "image");
+      throw error;
     }
+    const previous = course[fields.publicId];
+    if (previous && previous !== asset.publicId) await deleteAsset(previous, "image");
     invalidateCatalog();
     refresh();
     return null;
   });
 }
 
-export async function removeCourseThumbnail(courseId: string): Promise<ActionResult> {
-  return runAction("removeCourseThumbnail", async () => {
+export async function removeCourseImage(courseId: string, image: unknown): Promise<ActionResult> {
+  return runAction("removeCourseImage", async () => {
     const { course } = await authorizeTeacherForCourse(courseId);
-    await col("courses").doc(course.id).update({
-      thumbnailUrl: null,
-      thumbnailPublicId: null,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    if (course.thumbnailPublicId) await deleteAsset(course.thumbnailPublicId, "image");
+    const fields = IMAGE_FIELDS[parseImage(image)];
+    await col("courses").doc(course.id).update({ [fields.url]: null, [fields.publicId]: null, updatedAt: FieldValue.serverTimestamp() });
+    const previous = course[fields.publicId];
+    if (previous) await deleteAsset(previous, "image");
     invalidateCatalog();
     refresh();
     return null;
+  });
+}
+
+// --- Course deletion -------------------------------------------------------------
+
+async function courseUsage(courseId: string): Promise<CourseUsage> {
+  const names = ["enrollments", "batches", "registrations", "billingAccounts", "payments", "packages", "submissions", "reviews"] as const;
+  const counts = await Promise.all(names.map((name) => col(name).where("courseId", "==", courseId).count().get()));
+  return Object.fromEntries(names.map((name, i) => [name, counts[i].data().count])) as unknown as CourseUsage;
+}
+
+/**
+ * Permanently deletes a course that no student ever used: the course record,
+ * its modules and lessons, and the media files stored in the course's own
+ * Cloudinary folder. A course with any enrolment, batch, registration, billing
+ * or payment history is refused (archive it instead), so no student or payment
+ * record is ever orphaned or removed.
+ */
+export async function deleteCourse(courseId: string, confirmTitle: unknown): Promise<ActionResult> {
+  return runAction("deleteCourse", async () => {
+    const { user, course } = await authorizeTeacherForCourse(courseId);
+    if (cleanText(confirmTitle, LIMITS.title) !== course.title.trim()) {
+      throw new AccessError("Please fix the highlighted fields.", { confirmTitle: "Type the course title exactly to confirm." });
+    }
+    const plan = courseDeletionPlan(await courseUsage(course.id));
+    if (plan.kind === "blocked") throw new AccessError(plan.reason);
+
+    const [modulesSnap, lessonsSnap] = await Promise.all([
+      col("modules").where("courseId", "==", course.id).get(),
+      col("lessons").where("courseId", "==", course.id).get(),
+    ]);
+    const lessons = lessonsSnap.docs.map(mapLesson).filter((l) => l !== null);
+
+    // Media owned by this course (inside its own Cloudinary folder only).
+    let assets: ReturnType<typeof ownedAssets> = [];
+    try {
+      assets = ownedAssets(courseFolder(course.id), [
+        { publicId: course.thumbnailPublicId, resourceType: "image" },
+        { publicId: course.coverPublicId, resourceType: "image" },
+        ...lessons.flatMap((l) => l.resources.filter((r) => r.source === "cloudinary").map((r) => ({ publicId: r.publicId, resourceType: r.cloudinaryResourceType }))),
+      ]);
+    } catch (error) {
+      if (!(error instanceof MediaConfigError)) throw error;
+      console.error("[deleteCourse] Cloudinary is not configured; uploaded files were not removed for course", course.id);
+    }
+
+    // Children first, the course last: a failure part-way leaves the course in
+    // place (still listed, deletable again) rather than orphaned lessons.
+    const refs = [...modulesSnap.docs.map((d) => d.ref), ...lessonsSnap.docs.map((d) => d.ref)];
+    for (let i = 0; i < refs.length; i += 450) {
+      const batch = db().batch();
+      refs.slice(i, i + 450).forEach((ref) => batch.delete(ref));
+      await batch.commit();
+    }
+    await col("courses").doc(course.id).delete();
+    await writeAudit(user, {
+      action: "course.delete",
+      targetType: "course",
+      targetId: course.id,
+      summary: `Deleted course "${course.title}" (${modulesSnap.size} modules, ${lessonsSnap.size} lessons, ${assets.length} media files)`,
+    });
+    invalidateCatalog();
+
+    // Database records are gone; now remove the files (failures are logged).
+    await Promise.all(assets.map((a) => deleteAsset(a.publicId, a.resourceType)));
+    redirect("/teacher/courses");
   });
 }
 
@@ -565,11 +676,12 @@ export async function createResourceUpload(
   courseId: string,
   lessonId: string,
   kind: unknown,
+  fileName?: unknown,
 ): Promise<ActionResult<UploadTicket>> {
   return runAction("createResourceUpload", async () => {
     const { course } = await authorizeTeacherForCourse(courseId);
     await getLessonOfCourse(course.id, lessonId);
-    return createUploadTicket(course.id, parseKind(kind), "resource");
+    return createUploadTicket(course.id, parseKind(kind), "resource", typeof fileName === "string" ? fileName : undefined);
   });
 }
 
@@ -610,7 +722,8 @@ export async function addUploadedResource(
           fileName: cleanText(input.fileName, 200) || null,
           format: asset.format,
           bytes: asset.bytes,
-          downloadable: (kind === "pdf" || kind === "image") && input.downloadable === true,
+          // Documents cannot be viewed in the browser, so they are always downloadable.
+          downloadable: kind === "document" || (isDownloadableKind(kind) && input.downloadable === true),
           order: nextResourceOrder(resources, language),
           createdAt: Timestamp.now(),
         },
@@ -688,7 +801,7 @@ export async function updateResource(
           ...r,
           title,
           language,
-          downloadable: (r.type === "pdf" || r.type === "image") && input.downloadable === true,
+          downloadable: r.type === "document" || (isDownloadableKind(String(r.type)) && input.downloadable === true),
           order: languageChanged ? nextResourceOrder(resources, language) : r.order,
         };
       }),

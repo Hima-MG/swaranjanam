@@ -7,9 +7,16 @@ const MB = 1024 * 1024;
 
 export type UploadKind = ResourceType;
 
+export type CloudinaryResourceType = "image" | "video" | "raw";
+
 export interface UploadRule {
-  /** Cloudinary resource type the file is uploaded as. Audio uploads as "video". */
-  resourceType: "image" | "video";
+  /**
+   * Cloudinary resource type the file is uploaded as. Audio uploads as
+   * "video" (Cloudinary's audio handling); PDFs as "image" (page previews and
+   * inline viewing); Word/PowerPoint/Excel/text files as "raw" (delivered
+   * unchanged, with their file extension kept in the public id).
+   */
+  resourceType: CloudinaryResourceType;
   /** Formats Cloudinary must detect (signed as `allowed_formats`). */
   formats: string[];
   /** MIME types offered in the file picker. */
@@ -20,7 +27,8 @@ export interface UploadRule {
 
 /**
  * Size limits stay at or below Cloudinary's free-plan per-file limits
- * (10 MB images, 100 MB video) because uploads are sent in a single request.
+ * (10 MB images and raw files, 100 MB video) because uploads are sent in a
+ * single request.
  */
 export const UPLOAD_RULES: Record<UploadKind, UploadRule> = {
   image: {
@@ -36,6 +44,32 @@ export const UPLOAD_RULES: Record<UploadKind, UploadRule> = {
     accept: ["application/pdf"],
     maxBytes: 10 * MB,
     label: "PDF, up to 10 MB",
+  },
+  document: {
+    resourceType: "raw",
+    formats: ["doc", "docx", "ppt", "pptx", "xls", "xlsx", "odt", "rtf", "txt"],
+    accept: [
+      ".doc",
+      ".docx",
+      ".ppt",
+      ".pptx",
+      ".xls",
+      ".xlsx",
+      ".odt",
+      ".rtf",
+      ".txt",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.oasis.opendocument.text",
+      "application/rtf",
+      "text/plain",
+    ],
+    maxBytes: 10 * MB,
+    label: "Word, PowerPoint, Excel, ODT, RTF or text file, up to 10 MB",
   },
   audio: {
     resourceType: "video",
@@ -116,7 +150,17 @@ export function toApprovedVideoEmbed(input: string): string | null {
 /** Hosts the lesson player will load in an iframe. */
 export const EMBED_HOSTS = ["www.youtube-nocookie.com", "player.vimeo.com"];
 
-/** Download URL for a Cloudinary file: asks Cloudinary to send it as an attachment. */
+/**
+ * Download URL for a Cloudinary file: asks Cloudinary to send it as an
+ * attachment. Raw files (documents) do not accept delivery flags and are
+ * returned unchanged; browsers download them anyway.
+ */
 export function attachmentUrl(url: string): string {
+  if (url.includes("/raw/upload/")) return url;
   return url.replace("/upload/", "/upload/fl_attachment/");
+}
+
+/** Resource kinds students may be allowed to download (documents always are). */
+export function isDownloadableKind(kind: string): boolean {
+  return kind === "pdf" || kind === "image" || kind === "document";
 }

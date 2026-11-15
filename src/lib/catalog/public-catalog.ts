@@ -1,22 +1,18 @@
 // Builds the public course catalogue. PURE: unit-tested, no I/O.
 //
-// Sources, in order of authority:
-//  1. Published Firestore courses whose availability a teacher has set
-//     ("Open for enrolment" / "Coming soon").
-//  2. The academy's approved catalogue (data/approved-courses.ts), but ONLY
-//     for a slug that does not exist in Firestore at all. Once a teacher
-//     creates that course, Firestore decides (draft = not shown).
+// Source: published Firestore courses whose availability a teacher has set
+// ("Open for enrolment" / "Coming soon" / "Closed"). There is no hardcoded
+// fallback catalogue: with no published courses the public list is empty.
 // A published course without an availability setting (e.g. migrated template
 // content that nobody has reviewed) is not listed publicly.
 //
 // Fees: "open" courses get their OWN rates (course pricing, only the class
-// types the course offers); a course saved before course pricing existed, and
-// an approved-catalogue course, uses the academy's confirmed rates in force.
+// types the course offers); a course saved before course pricing existed uses
+// the academy's confirmed rates in force.
 // "coming_soon" and "closed" courses get null. Nothing student-specific
 // (agreed rates, enrolments, payments) is ever included.
 
 import { toPublicProgramme } from "@/lib/lms/programme";
-import type { ApprovedCourse } from "@/data/approved-courses";
 import { publicFeesFromPricing, type PublicCourseFees } from "@/lib/catalog/public-pricing";
 import { effectiveCoursePricing } from "@/lib/lms/course-pricing";
 import type { CourseRecord } from "@/lib/lms/types";
@@ -56,6 +52,7 @@ export function fromFirestore(entry: FirestoreCatalogEntry, fees: PublicCourseFe
     description: c.description,
     descriptionMl: c.descriptionMl,
     thumbnailUrl: c.thumbnailUrl,
+    coverUrl: c.coverUrl,
     level: c.level,
     category: c.category,
     format: c.format,
@@ -77,65 +74,17 @@ export function fromFirestore(entry: FirestoreCatalogEntry, fees: PublicCourseFe
   };
 }
 
-export function fromApproved(a: ApprovedCourse, fees: PublicCourseFees): Course {
-  return {
-    id: a.slug,
-    slug: a.slug,
-    title: a.title,
-    titleMl: "",
-    subtitle: a.subtitle,
-    subtitleMl: "",
-    description: a.description,
-    descriptionMl: "",
-    thumbnailUrl: null,
-    level: a.level,
-    category: a.category,
-    format: "Live Online",
-    duration: "",
-    ageGroup: a.audience,
-    instructor: "",
-    availability: a.availability,
-    fee: a.availability === "open" ? publicFeesFromPricing(effectiveCoursePricing(null, confirmedRates(fees))) : null,
-    programme: null,
-    prerequisites: [],
-    source: "approved",
-    tag: null,
-    featured: a.featured,
-    outcomes: a.content,
-    outcomesMl: [],
-    moduleCount: 0,
-    lessonCount: 0,
-    tone: toneFor(a.slug),
-  };
+/** The public catalogue: every listed Firestore course, in display order. */
+export function buildPublicCatalog(input: { firestore: readonly FirestoreCatalogEntry[]; fees: PublicCourseFees }): Course[] {
+  return sortCatalog(input.firestore.map((e) => fromFirestore(e, input.fees)).filter((c): c is Course => c !== null));
 }
 
-/**
- * The public catalogue. `knownSlugs` is every course slug in Firestore,
- * whatever its status, so a draft or unpublished course is never replaced by
- * its approved fallback.
- */
-export function buildPublicCatalog(input: {
-  firestore: readonly FirestoreCatalogEntry[];
-  knownSlugs: ReadonlySet<string>;
-  approved: readonly ApprovedCourse[];
-  fees: PublicCourseFees;
-}): Course[] {
-  const fromDb = input.firestore.map((e) => fromFirestore(e, input.fees)).filter((c): c is Course => c !== null);
-  const fallback = input.approved.filter((a) => !input.knownSlugs.has(a.slug)).map((a) => fromApproved(a, input.fees));
-  return sortCatalog([...fromDb, ...fallback], input.approved.map((a) => a.slug));
-}
-
-/** Open courses first, then featured, then the approved catalogue order, then title. */
-export function sortCatalog(courses: Course[], approvedOrder: readonly string[] = []): Course[] {
-  const rank = (slug: string) => {
-    const i = approvedOrder.indexOf(slug);
-    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-  };
+/** Open courses first, then featured, then title. */
+export function sortCatalog(courses: Course[]): Course[] {
   return [...courses].sort(
     (a, b) =>
       Number(b.availability === "open") - Number(a.availability === "open") ||
       Number(b.featured) - Number(a.featured) ||
-      rank(a.slug) - rank(b.slug) ||
       a.title.localeCompare(b.title),
   );
 }

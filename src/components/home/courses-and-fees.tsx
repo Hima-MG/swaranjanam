@@ -3,7 +3,7 @@ import { CourseGrid } from "@/components/course/course-grid";
 import { FeeSummary } from "@/components/course/course-fees";
 import { Section } from "@/components/ui/section";
 import { SectionHeader } from "@/components/ui/section-header";
-import { CLASS_DETAILS } from "@/data/approved-courses";
+import { CLASS_DETAILS } from "@/data/content";
 import type { PublicCourseFees } from "@/lib/catalog/public-pricing";
 import type { CatalogResult } from "@/lib/catalog/server";
 import type { Course } from "@/types/course";
