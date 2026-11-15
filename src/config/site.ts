@@ -24,7 +24,10 @@ export function resolveSiteUrl(
 }
 
 // Site-wide configuration. Contact details are the academy's confirmed details.
-const WHATSAPP_NUMBER = "+91 85475 45175";
+// The academy number is shown as "79091 50030" everywhere; call and WhatsApp
+// links use the international form (+91 7909150030).
+const PHONE_DISPLAY = "79091 50030";
+const PHONE_INTERNATIONAL = "+917909150030";
 
 export const siteConfig = {
   name: "Swaraanjanam",
@@ -35,10 +38,12 @@ export const siteConfig = {
   url: resolveSiteUrl(),
   contact: {
     email: "swaraanjanammusicacademy@gmail.com",
-    phone: "+91 85475 45175",
-    whatsapp: WHATSAPP_NUMBER,
-    /** Official click-to-chat link: digits only, country code first (918547545175). */
-    whatsappUrl: `https://wa.me/${WHATSAPP_NUMBER.replace(/\D/g, "")}`,
+    phone: PHONE_DISPLAY,
+    /** `tel:` link target in international format. */
+    phoneHref: `tel:${PHONE_INTERNATIONAL}`,
+    whatsapp: PHONE_DISPLAY,
+    /** Official click-to-chat link: digits only, country code first (917909150030). */
+    whatsappUrl: `https://wa.me/${PHONE_INTERNATIONAL.replace(/\D/g, "")}`,
     address: "Palakkad, Kerala, India",
     hours: "Monday–Saturday, 9:00 AM–6:00 PM IST",
   },

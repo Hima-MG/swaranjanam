@@ -71,12 +71,8 @@ describe("FAQ", () => {
     assert.match(book.answer, /Sangeetha Sampoorna – Beginners Level by Dr\. Anuradha Mahesh/);
     assert.match(book.answer, /order on WhatsApp 80757 56318/);
   });
-  test("no fixed batch timing; schedules confirmed after registration", () => {
-    assert.ok(!/Saturday|7–8 PM|timings are fixed/i.test(all));
-    const timing = items.find((i) => i.question === "What are the class days and timings?");
-    assert.equal(
-      timing.answer,
-      "Class schedules are confirmed after registration. The academy assigns students to suitable batches or confirms individual class timings based on teacher availability and student preferences. Students receive their confirmed schedule through their dashboard and email.",
-    );
+  test("no public class timing information", () => {
+    assert.ok(!/Saturday|7–8 PM|timings are fixed|class days and timings/i.test(all));
+    assert.equal(items.some((i) => /timing/i.test(i.question)), false);
   });
 });

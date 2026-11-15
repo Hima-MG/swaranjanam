@@ -22,11 +22,6 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
     : "Fees are charged per session. You pay for your first class or session when you enrol, and that payment is deducted on your first monthly invoice. After that you are invoiced on the last day of each calendar month for the classes held, and pay within 3 days. There is no registration fee.";
   return [
     {
-      question: "What are the class days and timings?",
-      answer:
-        "Class schedules are confirmed after registration. The academy assigns students to suitable batches or confirms individual class timings based on teacher availability and student preferences. Students receive their confirmed schedule through their dashboard and email.",
-    },
-    {
       question: "Who can join?",
       answer:
         "Anyone who loves music but hasn't yet learned the basics – kids, adults, students, working professionals and homemakers. Complete beginners are welcome!",
@@ -60,7 +55,7 @@ export function faqItems(fee: PublicCourseFees | null): FaqItem[] {
     },
     {
       question: "Can students from abroad join?",
-      answer: "Absolutely! We already have students from abroad. Class timings are confirmed after registration, taking your time zone and preferences into account.",
+      answer: "Absolutely! We already have students from abroad. Your class schedule is arranged with you after you enrol, taking your time zone into account.",
     },
     {
       question: "What will be taught?",
