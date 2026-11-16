@@ -97,6 +97,9 @@ describe("removed public content", () => {
       assert.doesNotMatch(read(f), /any day except Sunday|batch timings fixed|class days and timings|morning batch|evening batch/i, f);
     }
   });
+  test("no fixed academy hours (9 AM–6 PM) anywhere on the site", () => {
+    for (const f of SRC) assert.doesNotMatch(read(f), /9:00\s?AM\s?[–-]\s?6:00\s?PM|Monday[–-]Saturday/i, f);
+  });
 });
 
 describe("homepage section buttons", () => {

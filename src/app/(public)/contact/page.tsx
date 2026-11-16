@@ -1,4 +1,4 @@
-import { Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
+import { Mail, MapPin, MessageCircle, Phone } from "lucide-react";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
@@ -25,7 +25,6 @@ const contactDetails = [
   { icon: Phone, label: "Phone", value: contact.phone, href: contact.phoneHref },
   { icon: MessageCircle, label: "WhatsApp", value: contact.whatsapp, href: contact.whatsappUrl },
   { icon: MapPin, label: "Location", value: contact.address },
-  { icon: Clock, label: "Hours", value: contact.hours },
 ];
 
 const selectClassName =
