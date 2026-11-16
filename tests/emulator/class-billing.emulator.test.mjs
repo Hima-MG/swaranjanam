@@ -643,8 +643,9 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
     db.collection("courses").doc(id(slug)).set({ id: id(slug), slug, title: slug, description: "", status: "published", teacherIds: [teacher.uid], ...data });
 
   test("only reviewed published Firestore courses are listed (no hardcoded fallback); fees come from the billing rates", async () => {
-    // Unreviewed template course (published, no availability) and a draft.
-    await write(`template-${run}`, { availability: null, price: 4999, tag: "Bestseller" });
+    // Unreviewed template import (published, no availability), a teacher's course whose status was never set, and a draft.
+    await write(`template-${run}`, { availability: null, price: 4999, tag: "Bestseller", migratedFrom: "static-catalogue" });
+    await write(`never-set-${run}`, { availability: null });
     await write("little-swaras", { status: "draft", availability: "open" });
     // A teacher-managed open course and a coming-soon course.
     await write(`teacher-open-${run}`, { title: "Teacher course", availability: "open", price: 9999 });
@@ -655,6 +656,7 @@ describe("public courses & fees (server catalogue against Firestore)", () => {
     assert.equal(result.ok, true);
     const bySlug = new Map(result.data.map((c) => [c.slug, c]));
     assert.equal(bySlug.has(`template-${run}`), false, "unreviewed template course hidden");
+    assert.equal(bySlug.get(`never-set-${run}`)?.availability, "open", "a dashboard course whose status was never set is listed as open");
     assert.equal(bySlug.has("little-swaras"), false, "drafts are never listed");
     assert.equal(bySlug.has("swara-foundation"), false, "no hardcoded fallback course");
     assert.ok(result.data.every((c) => c.source === "firestore"));

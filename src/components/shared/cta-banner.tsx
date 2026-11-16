@@ -3,8 +3,11 @@ import Link from "next/link";
 
 import { Mandala } from "@/components/decor/mandala";
 import { Ornament } from "@/components/decor/ornament";
+import { SectionLink } from "@/components/shared/section-link";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
+
+const OUTLINE_ON_MAROON = "border-cream/40 text-cream hover:border-cream hover:bg-cream/10 hover:text-cream";
 
 interface CtaBannerProps {
   title?: string;
@@ -25,19 +28,18 @@ export function CtaBanner({
             <h2 className="type-h2 text-cream">{title}</h2>
             <Ornament className="text-gold-light" />
             <p className="type-lead text-cream/80">{description}</p>
-            <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-2 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+              {/* Enrol: student sign-up, then choose a course and pay for the first class. */}
               <Button asChild size="lg" variant="gold">
-                <Link href="/#courses">
+                <Link href="/register">
                   Enrol now <ArrowRight data-icon="inline-end" />
                 </Link>
               </Button>
-              <Button
-                asChild
-                size="lg"
-                variant="outline"
-                className="border-cream/40 text-cream hover:border-cream hover:bg-cream/10 hover:text-cream"
-              >
-                <Link href="/#courses">Courses &amp; fees</Link>
+              <Button asChild size="lg" variant="outline" className={OUTLINE_ON_MAROON}>
+                <SectionLink href="/#courses">Courses</SectionLink>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={OUTLINE_ON_MAROON}>
+                <SectionLink href="/#fees">Fees</SectionLink>
               </Button>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
 import { cacheLife } from "next/cache";
-import Link from "next/link";
+import { SectionLink } from "@/components/shared/section-link";
 import { Fragment, Suspense } from "react";
 
 import { Logo } from "@/components/layout/logo";
@@ -38,9 +38,9 @@ function FooterColumn({ title, items }: { title: string; items: NavItem[] }) {
       <ul className="mt-5 flex flex-col gap-3 text-sm">
         {items.map((item) => (
           <li key={item.href}>
-            <Link href={item.href} className="text-cream/75 transition-colors hover:text-gold-light">
+            <SectionLink href={item.href} className="text-cream/75 transition-colors hover:text-gold-light">
               {item.label}
-            </Link>
+            </SectionLink>
           </li>
         ))}
       </ul>

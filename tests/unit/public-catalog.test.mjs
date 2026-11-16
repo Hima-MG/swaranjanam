@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { buildPublicCatalog } from "../../src/lib/catalog/public-catalog.ts";
+import { buildPublicCatalog, publicAvailability } from "../../src/lib/catalog/public-catalog.ts";
 import { discounted, FEE_TERMS, publicFeesFromRate, SIBLING_DISCOUNT_ENABLED, SIBLING_DISCOUNT_PERCENT } from "../../src/lib/catalog/public-pricing.ts";
 import { DEFAULT_RATE_VERSION } from "../../src/lib/lms/class-billing.ts";
 
@@ -16,7 +16,7 @@ const FEES = publicFeesFromRate(DEFAULT_RATE_VERSION);
 function record(overrides = {}) {
   return {
     id: "c1", slug: "c1", title: "Course", titleMl: "", description: "Description", descriptionMl: "",
-    thumbnailUrl: null, thumbnailPublicId: null, coverUrl: null, coverPublicId: null, status: "published", teacherIds: ["teacher-uid"], createdAt: null, updatedAt: null,
+    thumbnailUrl: null, thumbnailPublicId: null, coverUrl: null, coverPublicId: null, importedTemplate: false, hiddenFromPublic: false, status: "published", teacherIds: ["teacher-uid"], createdAt: null, updatedAt: null,
     subtitle: "", subtitleMl: "", level: null, category: null, format: null, duration: "12 weeks", ageGroup: "", instructor: "",
     price: 4999, originalPrice: 6499, tag: null, featured: false, outcomes: [], outcomesMl: [], availability: "open",
     ...overrides,
@@ -89,9 +89,31 @@ describe("buildPublicCatalog", () => {
     assert.equal(build([entry({ status: "draft" }), entry({ id: "c3", slug: "c3", status: "archived" })]).length, 0);
   });
 
-  test("a published course without an availability setting (unreviewed template content) is not listed", () => {
-    const list = build([entry({ slug: "basics-for-beginners", availability: null, tag: "Bestseller" })]);
-    assert.equal(list.some((c) => c.slug === "basics-for-beginners"), false);
+  test("a published course whose enrolment status was never set is listed as open (it used to be invisible)", () => {
+    const [course] = build([entry({ slug: "made-in-dashboard", availability: null })]);
+    assert.equal(course?.slug, "made-in-dashboard");
+    assert.equal(course.availability, "open");
+    assert.deepEqual(course.fee, FEES);
+  });
+
+  test("unreviewed template imports and courses the teacher marked 'Not listed' stay hidden; drafts never show", () => {
+    const list = build([
+      entry({ id: "t1", slug: "basics-for-beginners", availability: null, importedTemplate: true, tag: "Bestseller" }),
+      entry({ id: "t2", slug: "hidden-course", availability: null, hiddenFromPublic: true }),
+      entry({ id: "t3", slug: "draft-course", availability: null, status: "draft" }),
+    ]);
+    assert.deepEqual(list, []);
+    assert.equal(publicAvailability({ status: "published", availability: "coming_soon", hiddenFromPublic: false, importedTemplate: true }), "coming_soon");
+    assert.equal(publicAvailability({ status: "archived", availability: "open", hiddenFromPublic: false, importedTemplate: false }), null);
+  });
+
+  test("publishing opens a course with no status, and 'Not listed' is saved explicitly", () => {
+    const actions = read("src/app/(account)/teacher/actions.ts");
+    assert.match(actions, /const opens = status === "published" && course\.availability === null && !course\.hiddenFromPublic;/);
+    assert.match(actions, /hiddenFromPublic: fields\.availability === null/);
+    // Every public read uses the same rule.
+    const server = read("src/lib/catalog/server.ts");
+    assert.equal((server.match(/publicAvailability\(/g) ?? []).length, 2);
   });
 
   test("teacher-set availability decides fees: coming soon shows no fee, open shows the current rates", () => {

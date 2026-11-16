@@ -138,10 +138,18 @@ been added yet." and the public site shows an empty state. Create courses in
 **Teacher → Course management → New course**, add modules and lessons, set the
 catalogue details (including the public enrolment status) and publish.
 
+A published course appears on the public website automatically (no
+redeploy): every dashboard change refreshes the cached catalogue. Its listing
+follows **Catalogue details → Enrolment & public fees**: Open, Coming soon or
+Closed are listed; "Not listed publicly" hides it. A course whose status was
+never set is listed as Open, and publishing it saves that. The course editor
+header always says whether the course is on the website.
+
 Course records imported earlier from the old static catalogue (e.g. "Sarali
 Varisai", "Basics for Beginners") may still exist in Firestore. They are listed
 in Course management like any other course: delete the ones without students,
-and archive the rest.
+and archive the rest. While unreviewed (no enrolment status chosen) they are
+not listed publicly.
 
 ## 5. Cloudinary
 

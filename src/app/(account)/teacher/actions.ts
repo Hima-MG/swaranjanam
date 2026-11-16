@@ -204,7 +204,8 @@ export async function updateCourseCatalog(courseId: string, input: unknown): Pro
       slug = requestedSlug;
     }
 
-    await col("courses").doc(course.id).update({ ...fields, slug, updatedAt: FieldValue.serverTimestamp() });
+    // "Not listed publicly" is stored explicitly, so it is never confused with a status that was never set.
+    await col("courses").doc(course.id).update({ ...fields, slug, hiddenFromPublic: fields.availability === null, updatedAt: FieldValue.serverTimestamp() });
     await writeAudit(user, {
       action: "course.catalog",
       targetType: "course",
@@ -227,7 +228,9 @@ export async function setCourseStatus(courseId: string, status: unknown): Promis
         throw new AccessError("Add at least one lesson before publishing this course.");
       }
     }
-    await col("courses").doc(course.id).update({ status, updatedAt: FieldValue.serverTimestamp() });
+    // Publishing a course that never had an enrolment status opens it, so it appears on the website.
+    const opens = status === "published" && course.availability === null && !course.hiddenFromPublic;
+    await col("courses").doc(course.id).update({ status, ...(opens ? { availability: "open" } : {}), updatedAt: FieldValue.serverTimestamp() });
     await writeAudit(user, {
       action: `course.${status}`,
       targetType: "course",

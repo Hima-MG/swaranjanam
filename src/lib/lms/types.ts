@@ -127,6 +127,10 @@ export interface CourseRecord extends CourseCatalogFields {
   descriptionMl: string;
   thumbnailUrl: string | null;
   thumbnailPublicId: string | null;
+  /** Created by the one-off import of the old static catalogue (`migratedFrom`): unreviewed template content. */
+  importedTemplate: boolean;
+  /** The teacher chose "Not listed publicly" in Catalogue details. */
+  hiddenFromPublic: boolean;
   /** Wide banner image for the public course page (optional). */
   coverUrl: string | null;
   coverPublicId: string | null;

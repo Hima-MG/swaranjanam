@@ -1,6 +1,8 @@
 import { ArrowRight, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
+import { SectionLink } from "@/components/shared/section-link";
+
 import { Mandala } from "@/components/decor/mandala";
 import { Ornament } from "@/components/decor/ornament";
 import { Badge } from "@/components/ui/badge";
@@ -67,12 +69,12 @@ export function Hero() {
           </p>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
             <Button asChild size="lg">
-              <Link href="/#courses">
+              <SectionLink href="/#courses">
                 Courses &amp; fees <ArrowRight data-icon="inline-end" />
-              </Link>
+              </SectionLink>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="/#courses">Enrol now</Link>
+              <Link href="/register">Enrol now</Link>
             </Button>
           </div>
         </div>

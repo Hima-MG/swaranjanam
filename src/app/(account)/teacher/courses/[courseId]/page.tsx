@@ -19,6 +19,8 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDateTime } from "@/lib/format-date";
+import { publicAvailability } from "@/lib/catalog/public-catalog";
+import { COURSE_AVAILABILITY_LABELS } from "@/types/course";
 import { setProgrammeSessionRecording } from "@/app/(account)/teacher/programme-actions";
 import { getCoursePricingOverview } from "@/lib/lms/server/course-pricing";
 import { getCourseForEditing } from "@/lib/lms/server/teacher";
@@ -57,6 +59,7 @@ async function CourseEditor({ params }: { params: Params }) {
             <p className="text-xs text-muted-foreground">
               {outline.length} modules · {lessonCount} lessons · /{course.slug}
             </p>
+            <PublicListing course={course} />
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <CourseStatusControl courseId={course.id} status={course.status} />
@@ -233,6 +236,22 @@ async function CourseEditor({ params }: { params: Params }) {
       </section>
     </div>
   );
+}
+
+/** Whether — and how — the course appears on the public website right now. */
+function PublicListing({ course }: { course: Parameters<typeof publicAvailability>[0] }) {
+  const listed = publicAvailability(course);
+  if (course.status !== "published") {
+    return <p className="text-sm text-muted-foreground">Not on the website yet: publish the course to list it.</p>;
+  }
+  if (!listed) {
+    return (
+      <p className="text-sm font-medium text-destructive">
+        Published, but not listed on the website: choose an option under “Enrolment &amp; public fees” in Catalogue details.
+      </p>
+    );
+  }
+  return <p className="text-sm font-medium text-maroon">On the website: {COURSE_AVAILABILITY_LABELS[listed]}</p>;
 }
 
 export default function TeacherCoursePage({ params }: PageProps<"/teacher/courses/[courseId]">) {

@@ -98,3 +98,23 @@ describe("removed public content", () => {
     }
   });
 });
+
+describe("homepage section buttons", () => {
+  test("the CTA banner has Enrol now → /register, Courses → /#courses and Fees → /#fees", () => {
+    const banner = read("src/components/shared/cta-banner.tsx");
+    assert.match(banner, /<Link href="\/register">\s*Enrol now/);
+    assert.match(banner, /<SectionLink href="\/#courses">Courses<\/SectionLink>/);
+    assert.match(banner, /<SectionLink href="\/#fees">Fees<\/SectionLink>/);
+  });
+  test("the #fees anchor is always rendered, with or without published courses", () => {
+    const section = read("src/components/home/courses-and-fees.tsx");
+    assert.match(section, /<div id=\{FEES_SECTION_ID\}/);
+    assert.match(section, /export const FEES_SECTION_ID = "fees";/);
+  });
+  test("homepage section links never use a plain Link (it does nothing when the URL already has that hash)", () => {
+    for (const f of ["src/components/shared/cta-banner.tsx", "src/components/home/hero.tsx", "src/components/home/learning-path.tsx", "src/components/layout/nav-links.tsx", "src/components/layout/footer.tsx"]) {
+      assert.doesNotMatch(read(f), /<Link\s+href="\/#/, f);
+    }
+    assert.match(read("src/components/shared/section-link.tsx"), /scrollIntoView/);
+  });
+});

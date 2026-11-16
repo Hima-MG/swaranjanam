@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
+import { SectionLink } from "@/components/shared/section-link";
 import type { NavItem } from "@/config/site";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +33,7 @@ function NavLinkList({
         const active = pathname ? isActive(pathname, item.href) : false;
         return (
           <li key={item.href}>
-            <Link
+            <SectionLink
               href={item.href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
@@ -50,7 +50,7 @@ function NavLinkList({
               )}
             >
               {item.label}
-            </Link>
+            </SectionLink>
           </li>
         );
       })}

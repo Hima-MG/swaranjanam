@@ -16,7 +16,7 @@ import { toPublicProgramme } from "@/lib/lms/programme";
 import { publicFeesFromPricing, type PublicCourseFees } from "@/lib/catalog/public-pricing";
 import { effectiveCoursePricing } from "@/lib/lms/course-pricing";
 import type { CourseRecord } from "@/lib/lms/types";
-import type { Course, CourseTone } from "@/types/course";
+import type { Course, CourseAvailability, CourseTone } from "@/types/course";
 
 const TONES: CourseTone[] = ["maroon", "gold", "brown", "rose"];
 
@@ -33,6 +33,22 @@ export interface FirestoreCatalogEntry {
   lessonCount: number;
 }
 
+/**
+ * The enrolment status a course is listed with publicly, or null = not listed.
+ * Only published courses are listed. A course whose status was never set is
+ * treated as "Open for enrolment" (courses created in the dashboard before the
+ * status had a default were otherwise invisible after publishing), except
+ * when the teacher chose "Not listed publicly" or the course is an unreviewed
+ * import of the old static catalogue.
+ */
+export function publicAvailability(
+  c: Pick<CourseRecord, "status" | "availability" | "hiddenFromPublic" | "importedTemplate">,
+): CourseAvailability | null {
+  if (c.status !== "published") return null;
+  if (c.availability) return c.availability;
+  return c.hiddenFromPublic || c.importedTemplate ? null : "open";
+}
+
 /** The confirmed rates in force, for courses without their own saved pricing. */
 function confirmedRates(fees: PublicCourseFees) {
   return { batchMinor: fees.batchMinor ?? 0, individualMinor: fees.individualMinor ?? 0 };
@@ -40,7 +56,8 @@ function confirmedRates(fees: PublicCourseFees) {
 
 export function fromFirestore(entry: FirestoreCatalogEntry, fees: PublicCourseFees): Course | null {
   const { record: c } = entry;
-  if (c.status !== "published" || !c.availability) return null;
+  const availability = publicAvailability(c);
+  if (!availability) return null;
   const pricing = effectiveCoursePricing(c.storedPricing, confirmedRates(fees));
   return {
     id: c.id,
@@ -59,8 +76,8 @@ export function fromFirestore(entry: FirestoreCatalogEntry, fees: PublicCourseFe
     duration: c.duration,
     ageGroup: c.ageGroup,
     instructor: c.instructor,
-    availability: c.availability,
-    fee: c.availability === "open" && !c.programme ? publicFeesFromPricing(pricing) : null,
+    availability,
+    fee: availability === "open" && !c.programme ? publicFeesFromPricing(pricing) : null,
     programme: c.programme ? toPublicProgramme(c.programme) : null,
     prerequisites: c.prerequisites,
     source: "firestore",

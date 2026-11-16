@@ -172,6 +172,8 @@ export function mapCourse(snapshot: DocumentSnapshot<DocumentData>): CourseRecor
     descriptionMl: str(data.descriptionMl),
     thumbnailUrl: str(data.thumbnailUrl) || null,
     thumbnailPublicId: str(data.thumbnailPublicId) || null,
+    importedTemplate: str(data.migratedFrom) !== "",
+    hiddenFromPublic: data.hiddenFromPublic === true,
     coverUrl: str(data.coverUrl) || null,
     coverPublicId: str(data.coverPublicId) || null,
     status: oneOf(COURSE_STATUSES, data.status, "draft"),

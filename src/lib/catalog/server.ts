@@ -2,7 +2,7 @@ import "server-only";
 
 import { cacheLife, cacheTag } from "next/cache";
 
-import { buildPublicCatalog, fromFirestore } from "@/lib/catalog/public-catalog";
+import { buildPublicCatalog, fromFirestore, publicAvailability } from "@/lib/catalog/public-catalog";
 import { publicFeesFromRate, type PublicCourseFees } from "@/lib/catalog/public-pricing";
 import { periodOf, rateVersionForPeriod } from "@/lib/lms/class-billing";
 import { getClassBillingConfig } from "@/lib/lms/server/class-billing";
@@ -41,7 +41,7 @@ async function currentPublicFees(): Promise<PublicCourseFees> {
 
 async function readCatalog(): Promise<Course[]> {
   const [published, fees] = await Promise.all([col("courses").where("status", "==", "published").get(), currentPublicFees()]);
-  const courses = published.docs.map(mapCourse).filter((c): c is CourseRecord => c !== null && c.availability !== null);
+  const courses = published.docs.map(mapCourse).filter((c): c is CourseRecord => c !== null && publicAvailability(c) !== null);
   const firestore = await Promise.all(
     courses.map(async (record) => {
       const [modules, lessons] = await Promise.all([
@@ -106,7 +106,7 @@ export async function getPublishedCourseBySlug(slug: string): Promise<CatalogRes
       return { ok: true, data: null };
     }
     const course = mapCourse(snapshot.docs[0]);
-    if (!course || course.status !== "published" || !course.availability) {
+    if (!course || !publicAvailability(course)) {
       cacheLife("hours");
       return { ok: true, data: null };
     }
