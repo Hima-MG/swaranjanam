@@ -111,7 +111,6 @@ export interface BatchFormValues {
   /** Structured days/times; null for an older batch with only a text schedule (set them when editing). */
   weekly: WeeklySchedule | null;
   meetUrl: string | null;
-  capacity: number;
   status: "active" | "archived";
 }
 
@@ -119,12 +118,10 @@ export function BatchFormDialog({
   courses,
   teachers,
   existing,
-  maxCapacity,
 }: {
   courses: { id: string; title: string }[];
   teachers: { uid: string; label: string }[];
   existing?: BatchFormValues;
-  maxCapacity: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -152,7 +149,7 @@ export function BatchFormDialog({
         )
       }
       title={existing ? "Edit batch" : "Create a batch"}
-      description={`Up to ${maxCapacity} learners. Only active members can see the batch's Meet link, in their own dashboard.`}
+      description="No limit on learners. Only active members can see the batch's Meet link, in their own dashboard."
     >
       <form
         className="-mx-1 flex max-h-[72vh] flex-col gap-4 overflow-y-auto px-1 pb-1"
@@ -168,7 +165,6 @@ export function BatchFormDialog({
             startTime: d.get("startTime"),
             endTime: d.get("endTime"),
             meetUrl: d.get("meetUrl"),
-            capacity: d.get("capacity"),
             status: d.get("status") ?? "active",
           };
           run(() => (existing ? updateBatch(existing.id, input) : createBatch(input)), {
@@ -230,17 +226,12 @@ export function BatchFormDialog({
           <Field id="batch-meet" label="Google Meet link" error={e.meetUrl} hint="Shared by every class of this batch. Changing it updates upcoming classes.">
             <Input id="batch-meet" name="meetUrl" type="url" defaultValue={existing?.meetUrl ?? ""} placeholder="https://meet.google.com/…" autoComplete="off" />
           </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field id="batch-capacity" label={`Capacity (max ${maxCapacity})`} error={e.capacity}>
-              <Input id="batch-capacity" name="capacity" inputMode="numeric" defaultValue={existing?.capacity ?? maxCapacity} />
-            </Field>
-            <Field id="batch-status" label="Status">
-              <NativeSelect id="batch-status" name="status" defaultValue={existing?.status === "archived" ? "inactive" : "active"}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </NativeSelect>
-            </Field>
-          </div>
+          <Field id="batch-status" label="Status">
+            <NativeSelect id="batch-status" name="status" defaultValue={existing?.status === "archived" ? "inactive" : "active"}>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </NativeSelect>
+          </Field>
         </fieldset>
         {error && <FormAlert tone="error">{error}</FormAlert>}
         <div className="flex justify-end gap-2">

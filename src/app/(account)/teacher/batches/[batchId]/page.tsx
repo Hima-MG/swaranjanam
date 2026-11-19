@@ -12,7 +12,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
 import { formatMoney } from "@/lib/format";
 import { formatDate, formatDateTime } from "@/lib/format-date";
-import { ADVANCE_STATUS_LABELS, CLASS_OUTCOME_LABELS, MAX_BATCH_CAPACITY } from "@/lib/lms/class-billing";
+import { ADVANCE_STATUS_LABELS, CLASS_OUTCOME_LABELS } from "@/lib/lms/class-billing";
 import { CLASS_STATUS_LABELS, formatClassTime } from "@/lib/lms/classes";
 import type { LiveClassRecord } from "@/lib/lms/classes";
 import { getBatchDetail, listCourseOptions, listTeachers } from "@/lib/lms/server/batches";
@@ -66,7 +66,7 @@ async function BatchDetail({ params }: { params: Params }) {
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge variant={batch.status === "active" ? "gold" : "secondary"}>{batch.status === "active" ? "Active" : "Inactive"}</Badge>
             <Badge variant="outline">
-              {batch.memberCount}/{batch.capacity} learners
+              {batch.memberCount} learner{batch.memberCount === 1 ? "" : "s"}
             </Badge>
             {batch.meetUrl ? (
               <Button asChild variant="ghost" size="sm">
@@ -85,8 +85,7 @@ async function BatchDetail({ params }: { params: Params }) {
           <BatchFormDialog
             courses={courses}
             teachers={teachers}
-            maxCapacity={MAX_BATCH_CAPACITY}
-            existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, schedule: batch.schedule, weekly: batch.weekly, meetUrl: batch.meetUrl, capacity: batch.capacity, status: batch.status }}
+            existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, schedule: batch.schedule, weekly: batch.weekly, meetUrl: batch.meetUrl, status: batch.status }}
           />
           <DeleteBatchDialog batchId={batch.id} name={batch.name} memberCount={active.length} />
         </div>
@@ -94,7 +93,7 @@ async function BatchDetail({ params }: { params: Params }) {
 
       <section aria-labelledby="members" className="flex flex-col gap-4">
         <h2 id="members" className="type-h3">Learners</h2>
-        <AddMemberForm batchId={batch.id} candidates={candidates} disabled={batch.status !== "active" || batch.memberCount >= batch.capacity} />
+        <AddMemberForm batchId={batch.id} candidates={candidates} disabled={batch.status !== "active"} />
         {members.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-6 text-sm text-muted-foreground">No learners yet.</p>
         ) : (

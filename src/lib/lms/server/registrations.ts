@@ -333,8 +333,8 @@ export async function listRegistrations(user: SessionUser): Promise<Registration
 
 export interface RegistrationDetail {
   registration: RegistrationRecord;
-  /** Active batches of the registration's course with room (assignment candidates). */
-  batches: (BatchRecord & { full: boolean })[];
+  /** Active batches of the registration's course (assignment candidates). */
+  batches: BatchRecord[];
   batch: BatchRecord | null;
   /** Whether the course exists in the dashboard (needed to place the student). */
   courseInDashboard: boolean;
@@ -350,8 +350,7 @@ export async function getRegistrationDetail(user: SessionUser, id: string): Prom
   const batchesSnap = courseId ? await col("batches").where("courseId", "==", courseId).get() : null;
   const batches = (batchesSnap?.docs ?? [])
     .map(mapBatch)
-    .filter((b): b is BatchRecord => b !== null && b.status === "active")
-    .map((b) => ({ ...b, full: b.memberCount >= b.capacity }));
+    .filter((b): b is BatchRecord => b !== null && b.status === "active");
   const batch = registration.batchId ? mapBatch(await col("batches").doc(registration.batchId).get()) : null;
   return { registration, batches, batch, courseInDashboard: courseId !== null };
 }

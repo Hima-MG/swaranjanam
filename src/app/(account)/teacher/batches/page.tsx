@@ -7,7 +7,6 @@ import { TeacherPageHeader } from "@/components/lms/teacher/teacher-page-header"
 import { Badge } from "@/components/ui/badge";
 import { LoadingState } from "@/components/ui/loading-state";
 import { requireRole } from "@/lib/auth/session";
-import { MAX_BATCH_CAPACITY } from "@/lib/lms/class-billing";
 import { listBatches, listCourseOptions, listTeachers } from "@/lib/lms/server/batches";
 
 export const metadata: Metadata = { title: "Batches · Teacher" };
@@ -23,7 +22,7 @@ async function Batches() {
             New batches need a published regular course. Create and publish one in Course management first.
           </p>
         )}
-        <BatchFormDialog courses={courses} teachers={teachers} maxCapacity={MAX_BATCH_CAPACITY} />
+        <BatchFormDialog courses={courses} teachers={teachers} />
       </div>
       {batches.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border bg-cream-deep/50 p-8 text-sm text-muted-foreground">
@@ -37,8 +36,8 @@ async function Batches() {
                 <Link href={`/teacher/batches/${b.id}`} className="font-semibold text-brown hover:text-maroon hover:underline">
                   {b.name}
                 </Link>
-                <Badge variant={b.status === "active" ? (b.memberCount >= b.capacity ? "outline" : "gold") : "secondary"}>
-                  {b.status === "archived" ? "Inactive" : `${b.memberCount}/${b.capacity} learners`}
+                <Badge variant={b.status === "active" ? "gold" : "secondary"}>
+                  {b.status === "archived" ? "Inactive" : `${b.memberCount} learner${b.memberCount === 1 ? "" : "s"}`}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
@@ -59,7 +58,7 @@ export default function TeacherBatchesPage() {
     <>
       <TeacherPageHeader
         title="Manage batches"
-        description={`Small groups of up to ${MAX_BATCH_CAPACITY} learners with a shared schedule and Google Meet link. Attendance and billing stay individual.`}
+        description="Groups of learners (no size limit) with a shared schedule and Google Meet link. Attendance and billing stay individual."
       />
       <Suspense fallback={<LoadingState label="Loading batches…" />}>
         <Batches />

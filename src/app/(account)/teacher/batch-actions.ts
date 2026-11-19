@@ -5,7 +5,6 @@ import { refresh } from "next/cache";
 
 import { resolveRole } from "@/lib/auth/constants";
 import { getAdminAuth } from "@/lib/firebase/admin";
-import { MAX_BATCH_CAPACITY, parseCapacity } from "@/lib/lms/class-billing";
 import { ACADEMY_TIME_ZONE, formatClassTime, normalizeMeetUrl, parseClassTimes } from "@/lib/lms/classes";
 import { writeAudit } from "@/lib/lms/server/audit";
 import { notifyBatchAssigned } from "@/lib/notifications/events";
@@ -32,7 +31,6 @@ export interface BatchInput {
   startTime: unknown;
   endTime: unknown;
   meetUrl: unknown;
-  capacity: unknown;
   /** "active" or "inactive". */
   status?: unknown;
 }
@@ -64,10 +62,8 @@ function parseBatch(input: BatchInput) {
   const rawMeet = typeof input?.meetUrl === "string" ? input.meetUrl.trim() : "";
   const meetUrl = rawMeet ? normalizeMeetUrl(rawMeet) : null;
   if (rawMeet && !meetUrl) errors.meetUrl = "Enter a Google Meet link like https://meet.google.com/abc-defg-hij";
-  const capacity = parseCapacity(input?.capacity ?? MAX_BATCH_CAPACITY);
-  if (capacity === null) errors.capacity = `Enter a capacity from 1 to ${MAX_BATCH_CAPACITY}.`;
   const active = input?.status !== "inactive" && input?.status !== "archived";
-  return { name, weekly: weekly.value, meetUrl, capacity: capacity ?? MAX_BATCH_CAPACITY, active, errors };
+  return { name, weekly: weekly.value, meetUrl, active, errors };
 }
 
 export async function createBatch(input: BatchInput): Promise<ActionResult<{ batchId: string }>> {
@@ -85,7 +81,6 @@ export async function createBatch(input: BatchInput): Promise<ActionResult<{ bat
       teacher,
       weekly: parsed.weekly!,
       meetUrl: parsed.meetUrl,
-      capacity: parsed.capacity,
       active: parsed.active,
     });
     await writeAudit(user, { action: "batch.create", targetType: "batch", targetId: batchId, summary: `Created batch "${parsed.name}" for ${course.title} (${scheduleLabel(parsed.weekly!)})` });
@@ -155,9 +150,6 @@ export async function updateBatch(batchId: unknown, input: BatchInput): Promise<
     const changes = await db().runTransaction(async (tx) => {
       const batch = mapBatch(await tx.get(ref));
       if (!batch) throw new AccessError("That batch could not be found.");
-      if (parsed.capacity < batch.memberCount) {
-        throw new AccessError("Please fix the highlighted fields.", { capacity: `The batch already has ${batch.memberCount} learners.` });
-      }
       if (status === "archived" && batch.memberCount > 0) throw new AccessError("Remove or transfer all learners before making the batch inactive.");
       const linkChanged = (parsed.meetUrl ?? null) !== batch.meetUrl;
       const future = linkChanged && parsed.meetUrl ? await tx.get(col("liveClasses").where("batchId", "==", batch.id)) : null;
@@ -169,7 +161,6 @@ export async function updateBatch(batchId: unknown, input: BatchInput): Promise<
         endTime: parsed.weekly!.end,
         schedule: scheduleLabel(parsed.weekly!),
         meetUrl: parsed.meetUrl,
-        capacity: parsed.capacity,
         teacherId: teacher.uid,
         teacherName: teacher.name,
         status,
