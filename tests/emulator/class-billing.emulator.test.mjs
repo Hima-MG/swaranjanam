@@ -120,13 +120,13 @@ describe("batch membership", () => {
     await assert.rejects(addMemberTx(teacher, b, { uid: "s3", name: "S3" }), /another batch/);
   });
 
-  test("capacity is enforced under CONCURRENT additions", async () => {
-    const batchId = await makeBatch("cap", 2);
+  test("no capacity limit: CONCURRENT additions of many distinct students all succeed and memberCount stays correct", async () => {
+    const batchId = await makeBatch("cap");
     const students = ["c1", "c2", "c3", "c4", "c5"];
     await Promise.all(students.map((s) => enroll(s)));
     const results = await Promise.allSettled(students.map((uid) => addMemberTx(teacher, batchId, { uid, name: uid })));
-    assert.equal(results.filter((r) => r.status === "fulfilled").length, 2);
-    assert.equal((await db.collection("batches").doc(batchId).get()).get("memberCount"), 2);
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, students.length);
+    assert.equal((await db.collection("batches").doc(batchId).get()).get("memberCount"), students.length);
   });
 
   test("a transfer keeps the advance and every charge; removal cancels only future classes (not charged)", async () => {
@@ -737,8 +737,8 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
     db.collection("legacyDues").doc(uid).set({ studentId: uid, status: "no_previous_dues", note: "test", verifiedBy: teacher.uid, verifiedByEmail: teacher.email, verifiedAt: FieldValue.serverTimestamp() });
   const SAT_EVENING = { days: ["sat"], start: "19:00", end: "20:00" };
   /** A batch created through the teacher tool's server function (any days and times). */
-  const newBatch = (name, { courseId = enrolCourse, weekly: w = SAT_EVENING, capacity = 5, active = true } = {}) =>
-    createBatchRecord(teacher, { name: id(name), course: { id: courseId, title: "Enrol Course" }, teacher: { uid: teacher.uid, name: "Teacher" }, weekly: w, meetUrl: "https://meet.google.com/abc-defg-hij", capacity, active });
+  const newBatch = (name, { courseId = enrolCourse, weekly: w = SAT_EVENING, active = true } = {}) =>
+    createBatchRecord(teacher, { name: id(name), course: { id: courseId, title: "Enrol Course" }, teacher: { uid: teacher.uid, name: "Teacher" }, weekly: w, meetUrl: "https://meet.google.com/abc-defg-hij", active });
 
   /** Registers and pays through the real checkout confirmation (signature + fetched payment, all faked locally). */
   async function registerAndPay(uid, mode = "batch", slug = enrolSlug) {
@@ -1027,14 +1027,14 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
   });
 
   describe("teacher: batches and assignment", () => {
-    test("batch creation stores any days/times, capacity and active flag", async () => {
-      const batchId = await newBatch("created", { weekly: { days: ["sun", "wed"], start: "06:30", end: "07:15" }, capacity: 3, active: false });
+    test("batch creation stores any days/times and active flag; no capacity field is enforced", async () => {
+      const batchId = await newBatch("created", { weekly: { days: ["sun", "wed"], start: "06:30", end: "07:15" }, active: false });
       const b = mapBatch(await db.collection("batches").doc(batchId).get());
-      assert.deepEqual([b.weekly, b.schedule, b.capacity, b.status, b.memberCount], [{ days: ["wed", "sun"], start: "06:30", end: "07:15" }, "Wednesday & Sunday, 06:30–07:15 IST", 3, "archived", 0]);
-      await assert.rejects(createBatchRecord(student("x"), { name: "x", course: { id: enrolCourse, title: "x" }, teacher: { uid: "t", name: "t" }, weekly: SAT_EVENING, meetUrl: null, capacity: 5, active: true }), /Only the academy/);
+      assert.deepEqual([b.weekly, b.schedule, b.status, b.memberCount], [{ days: ["wed", "sun"], start: "06:30", end: "07:15" }, "Wednesday & Sunday, 06:30–07:15 IST", "archived", 0]);
+      await assert.rejects(createBatchRecord(student("x"), { name: "x", course: { id: enrolCourse, title: "x" }, teacher: { uid: "t", name: "t" }, weekly: SAT_EVENING, meetUrl: null, active: true }), /Only the academy/);
     });
 
-    test("assignment is refused before payment, for individual registrations, other courses, inactive or full batches and schedule conflicts", async () => {
+    test("assignment is refused before payment, for individual registrations, other courses or inactive batches and schedule conflicts — but never for batch size", async () => {
       const { saveRegistration, assignRegistrationToBatch } = await regs();
       const batchId = await newBatch("checks");
       // Unpaid.
@@ -1051,12 +1051,15 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
       await assert.rejects(assignRegistrationToBatch(teacher, paid.registrationId, await newBatch("other", { courseId: otherCourse })), /different course/);
       // Inactive batch.
       await assert.rejects(assignRegistrationToBatch(teacher, paid.registrationId, await newBatch("inactive", { active: false })), /inactive/);
-      // Full batch.
-      const full = await newBatch("full", { capacity: 1 });
+      // No capacity limit: a second and third student can join the same batch.
+      const unlimited = await newBatch("unlimited");
       const filler = await registerAndPay("rg-h4");
       await clearDues("rg-h4");
-      await assignRegistrationToBatch(teacher, filler.registrationId, full);
-      await assert.rejects(assignRegistrationToBatch(teacher, paid.registrationId, full), /full/i);
+      await assignRegistrationToBatch(teacher, filler.registrationId, unlimited);
+      const filler2 = await registerAndPay("rg-h4b");
+      await clearDues("rg-h4b");
+      await assignRegistrationToBatch(teacher, filler2.registrationId, unlimited);
+      assert.equal((await db.collection("batches").doc(unlimited).get()).get("memberCount"), 2);
       // Schedule conflict with the student's batch in another course (Saturday 19:00–20:00 vs 19:30–20:30).
       const otherBatch = await newBatch("h3-other", { courseId: otherCourse });
       await db.collection("enrollments").doc(`${otherCourse}_rg-h3`).set({ id: `${otherCourse}_rg-h3`, studentId: "rg-h3", courseId: otherCourse, status: "active", agreedFee: null, currency: "INR" });
@@ -1412,11 +1415,16 @@ describe("website registration + Razorpay Test Mode checkout (existing payment f
       // Paid: no second checkout, no second registration.
       await assert.rejects((await gw()).createOrderForStudent(student("lt-pay"), { kind: "registration", registrationId }), /Nothing is payable/);
       await assert.rejects(saveRegistration(student("lt-pay"), { slug: enrolSlug, mode: "shared_batch", details: pair("Esha R", "Farah R") }, NOW), /already registered and paid/);
-      // Capacity: a batch with one free place cannot take two learners.
-      await clearDues("lt-pay");
-      const tight = await newBatch("lt-tight", { capacity: 5 });
+      // No capacity limit: a batch already at what used to be the old cap (memberCount 4 of 5)
+      // still accepts a two-seat Learn Together enrolment.
+      const { registrationId: tightRegId } = await saveRegistration(student("lt-pay2"), { slug: enrolSlug, mode: "shared_batch", details: pair("Gita K", "Hema K") }, NOW);
+      await payFor("lt-pay2", tightRegId);
+      await clearDues("lt-pay2");
+      const tight = await newBatch("lt-tight");
       await db.collection("batches").doc(tight).update({ memberCount: 4 });
-      await assert.rejects(assignRegistrationToBatch(teacher, registrationId, tight), /needs 2/);
+      await assignRegistrationToBatch(teacher, tightRegId, tight);
+      assert.equal((await db.collection("batches").doc(tight).get()).get("memberCount"), 6);
+      await clearDues("lt-pay");
       const batchId = await newBatch("lt-batch");
       const { accountId } = await assignRegistrationToBatch(teacher, registrationId, batchId);
       assert.equal((await db.collection("batches").doc(batchId).get()).get("memberCount"), 2);

@@ -545,21 +545,9 @@ export function legacyDuesCleared(record: { status: string; verifiedBy: string |
 
 // --- Batches ------------------------------------------------------------------------------------------------
 
-export const MAX_BATCH_CAPACITY = 5;
-
-export function parseCapacity(value: unknown): number | null {
-  const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : NaN;
-  return Number.isInteger(n) && n >= 1 && n <= MAX_BATCH_CAPACITY ? n : null;
-}
-
-/** `seats`: learners joining together (2 for Learn Together — they take two places). */
-export function canAddMember(batch: { capacity: number; memberCount: number; status: string }, seats = 1): string | null {
-  if (batch.status !== "active") return "This batch is archived.";
-  const capacity = Math.min(batch.capacity, MAX_BATCH_CAPACITY);
-  if (batch.memberCount + seats > capacity) {
-    return batch.memberCount >= capacity ? `This batch is full (${batch.capacity} learners).` : `This batch has ${capacity - batch.memberCount} place(s) left; this enrolment needs ${seats}.`;
-  }
-  return null;
+/** Batches have no maximum size: the only reason a learner cannot be added is an archived batch. */
+export function canAddMember(batch: { status: string }): string | null {
+  return batch.status !== "active" ? "This batch is archived." : null;
 }
 
 export function batchMemberId(batchId: string, studentId: string): string {
