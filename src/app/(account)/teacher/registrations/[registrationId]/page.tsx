@@ -178,8 +178,8 @@ async function Registration({ params }: { params: Params }) {
                 registrationId={r.id}
                 batches={batches.map((b) => ({
                   id: b.id,
-                  disabled: b.full,
-                  label: `${b.name} — ${b.schedule || "no schedule"} — ${b.memberCount}/${b.capacity}${b.full ? " (full)" : ""}${
+                  disabled: false,
+                  label: `${b.name} — ${b.schedule || "no schedule"} — ${b.memberCount} learner${b.memberCount === 1 ? "" : "s"}${
                     b.weekly && b.weekly.days.some((w) => d.preferredDays.includes(w)) ? " — matches preferred days" : ""
                   }`,
                 }))}

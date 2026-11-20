@@ -30,7 +30,7 @@ import type { CourseScheduleInfo } from "@/lib/lms/course-pricing";
 //
 // Class-based billing and batches (lib/lms/class-billing.ts — rules;
 // lib/lms/server/class-billing.ts, lib/lms/server/batches.ts — data):
-//   batches/{autoId}                      — name, course, teacher, schedule, Meet link, capacity (≤5)
+//   batches/{autoId}                      — name, course, teacher, schedule, Meet link (no size limit)
 //   batchMembers/{batchId}_{studentId}    — membership history (active / removed / transferred)
 //   batchMembershipLocks/{studentId}_{courseId} — at most one active batch per learner per course
 //   billingAccounts/ba_{student}_{course}_{mode} — per-learner billing: advance ledger and suspension state

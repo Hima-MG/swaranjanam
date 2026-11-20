@@ -11,7 +11,6 @@ import {
   batchMemberId,
   type BillingMode,
   canAddMember,
-  MAX_BATCH_CAPACITY,
   membershipLockId,
 } from "@/lib/lms/class-billing";
 import { toStudentView, type LiveClassRecord, type StudentClassView } from "@/lib/lms/classes";
@@ -23,12 +22,11 @@ import { col, db, mapEnrollment, toIso } from "@/lib/lms/server/db";
 import { enrollmentId } from "@/lib/lms/types";
 import { isValidId } from "@/lib/lms/validation";
 
-// Batches: a group of up to five learners in one course, with one teacher,
-// a weekly schedule and a shared Google Meet link.
+// Batches: a group of learners (no maximum size) in one course, with one
+// teacher, a weekly schedule and a shared Google Meet link.
 //
-//  * Capacity and "one active batch per learner per course" are enforced in
-//    transactions (batch.memberCount + batchMembershipLocks), so concurrent
-//    additions cannot overfill a batch or double-book a learner.
+//  * "One active batch per learner per course" is enforced in transactions
+//    (batchMembershipLocks), so concurrent additions cannot double-book a learner.
 //  * Membership changes never touch billing: the learner's billing account is
 //    keyed by learner + course (not batch), so a transfer keeps the charges and
 //    the advance exactly as they are.
@@ -48,7 +46,6 @@ export interface BatchRecord {
   /** Structured class days and times (IST); null for older batches that only have a text schedule. */
   weekly: WeeklySchedule | null;
   meetUrl: string | null;
-  capacity: number;
   memberCount: number;
   /** "archived" is shown as Inactive. */
   status: "active" | "archived";
@@ -58,7 +55,6 @@ export interface BatchRecord {
 export function mapBatch(snapshot: DocumentSnapshot<DocumentData>): BatchRecord | null {
   const d = snapshot.data();
   if (!d) return null;
-  const capacity = typeof d.capacity === "number" && Number.isInteger(d.capacity) ? Math.min(Math.max(d.capacity, 1), MAX_BATCH_CAPACITY) : MAX_BATCH_CAPACITY;
   return {
     id: snapshot.id,
     name: String(d.name ?? "Batch"),
@@ -72,7 +68,6 @@ export function mapBatch(snapshot: DocumentSnapshot<DocumentData>): BatchRecord 
         ? { days: WEEKDAYS.filter((w) => (d.days as unknown[]).includes(w)) as Weekday[], start: d.startTime, end: d.endTime }
         : null,
     meetUrl: str(d.meetUrl),
-    capacity,
     memberCount: typeof d.memberCount === "number" ? d.memberCount : 0,
     status: d.status === "archived" ? "archived" : "active",
     createdAt: toIso(d.createdAt),
@@ -156,7 +151,7 @@ export function sharedAccountFields(registration: DocumentData | null | undefine
 /** Creates a batch. The caller has authorised the teacher and resolved the course and the batch's teacher. */
 export async function createBatchRecord(
   actor: SessionUser,
-  input: { name: string; course: { id: string; title: string }; teacher: { uid: string; name: string }; weekly: WeeklySchedule; meetUrl: string | null; capacity: number; active: boolean },
+  input: { name: string; course: { id: string; title: string }; teacher: { uid: string; name: string }; weekly: WeeklySchedule; meetUrl: string | null; active: boolean },
 ): Promise<string> {
   if (actor.role !== "teacher") throw new AccessError("Only the academy can create batches.");
   const ref = col("batches").doc();
@@ -171,7 +166,6 @@ export async function createBatchRecord(
     endTime: input.weekly.end,
     schedule: scheduleLabel(input.weekly),
     meetUrl: input.meetUrl,
-    capacity: input.capacity,
     memberCount: 0,
     status: input.active ? "active" : "archived",
     createdAt: FieldValue.serverTimestamp(),
@@ -253,8 +247,8 @@ export async function addMemberTx(actor: SessionUser, batchId: string, student: 
       registration && Array.isArray(registration.details?.learners) && registration.details.learners.length
         ? registration.details.learners.map((l: { fullName?: unknown }) => String(l?.fullName ?? ""))
         : [student.name];
-    const full = canAddMember(batch, seats);
-    if (full) throw new AccessError(full);
+    const blocked = canAddMember(batch);
+    if (blocked) throw new AccessError(blocked);
     const existingAccount = mapAccount(accountSnap);
     if (existingAccount?.status === "closed") {
       throw new AccessError("This student's billing account for the course is closed. Reopening needs a decision on the earlier billing history.");
@@ -382,8 +376,8 @@ export async function removeMemberTx(actor: SessionUser, batchId: string, studen
 
 /**
  * Moves a learner to another batch of the same course in one transaction:
- * capacity is checked on the target, and the billing account (charges, advance,
- * history) is untouched apart from the batch reference.
+ * the target must be active (batches have no size limit), and the billing
+ * account (charges, advance, history) is untouched apart from the batch reference.
  */
 export async function transferMemberTx(actor: SessionUser, fromBatchId: string, toBatchId: string, studentId: string) {
   if (fromBatchId === toBatchId) throw new AccessError("Choose a different batch.");
@@ -399,8 +393,8 @@ export async function transferMemberTx(actor: SessionUser, fromBatchId: string, 
     if (!from || !to) throw new AccessError("That batch could not be found.");
     if (!member || member.status !== "active") throw new AccessError("That learner is not an active member of this batch.");
     if (from.courseId !== to.courseId) throw new AccessError("Learners can only move between batches of the same course.");
-    const full = canAddMember(to, member.seats);
-    if (full) throw new AccessError(full);
+    const blocked = canAddMember(to);
+    if (blocked) throw new AccessError(blocked);
     const lockRef = col("batchMembershipLocks").doc(membershipLockId(studentId, from.courseId));
     const accountRef = col("billingAccounts").doc(member.accountId || accountIdFor(studentId, from.courseId, "batch"));
     const [accountSnap, future] = await Promise.all([tx.get(accountRef), futureBatchClasses(tx, from.id, studentId)]);
@@ -487,7 +481,7 @@ export async function getBatchDetail(user: SessionUser, batchId: string) {
     transferTargets: otherBatches.docs
       .map(mapBatch)
       .filter((b): b is BatchRecord => b !== null && b.id !== batchId && b.status === "active")
-      .map((b) => ({ id: b.id, label: `${b.name} (${b.memberCount}/${b.capacity})` })),
+      .map((b) => ({ id: b.id, label: `${b.name} (${b.memberCount} learner${b.memberCount === 1 ? "" : "s"})` })),
   };
 }
 
