@@ -2,7 +2,9 @@ import "server-only";
 
 import { FieldValue, Timestamp, type DocumentData, type DocumentSnapshot } from "firebase-admin/firestore";
 
+import { resolveRole } from "@/lib/auth/constants";
 import type { SessionUser } from "@/lib/auth/session";
+import { getAdminAuth } from "@/lib/firebase/admin";
 import { courseOptionsFrom, type BatchUsage } from "@/lib/lms/academy-courses";
 import {
   accountIdFor,
@@ -532,10 +534,26 @@ export async function getOwnBatches(user: SessionUser) {
   });
 }
 
+/**
+ * Teachers selectable for a batch. A Firestore profile with role "teacher" is
+ * not enough on its own: teacherFor() (batch-actions.ts) also requires the
+ * Firebase Auth record to exist, be enabled, and agree via resolveRole() (the
+ * custom claim wins over the profile field). Without this same check here, an
+ * account whose claim disagrees with its profile — or whose Auth record was
+ * deleted — could still appear as a selectable option, only to be rejected
+ * with "Choose a teacher." on submit.
+ */
 export async function listTeachers(user: SessionUser) {
   if (user.role !== "teacher") throw new Error("Teacher role required");
-  const snap = await col("users").where("role", "==", "teacher").select("displayName", "email").get();
-  return snap.docs.map((d) => ({ uid: d.id, label: str(d.get("displayName")) ?? str(d.get("email")) ?? d.id }));
+  const snap = await col("users").where("role", "==", "teacher").select("displayName", "email", "role").get();
+  const auth = getAdminAuth();
+  const accounts = await Promise.all(snap.docs.map((d) => auth.getUser(d.id).catch(() => null)));
+  return snap.docs
+    .filter((d, i) => {
+      const account = accounts[i];
+      return account != null && !account.disabled && resolveRole(account.customClaims?.role, d.get("role")) === "teacher";
+    })
+    .map((d) => ({ uid: d.id, label: str(d.get("displayName")) ?? str(d.get("email")) ?? d.id }));
 }
 
 /** Courses a new batch can belong to: published or archived regular courses (lib/lms/academy-courses.ts). */

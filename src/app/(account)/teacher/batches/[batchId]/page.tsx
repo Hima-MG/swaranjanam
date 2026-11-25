@@ -85,7 +85,7 @@ async function BatchDetail({ params }: { params: Params }) {
           <BatchFormDialog
             courses={courses}
             teachers={teachers}
-            existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, schedule: batch.schedule, weekly: batch.weekly, meetUrl: batch.meetUrl, status: batch.status }}
+            existing={{ id: batch.id, name: batch.name, courseId: batch.courseId, teacherId: batch.teacherId, teacherName: batch.teacherName, schedule: batch.schedule, weekly: batch.weekly, meetUrl: batch.meetUrl, status: batch.status }}
           />
           <DeleteBatchDialog batchId={batch.id} name={batch.name} memberCount={active.length} />
         </div>

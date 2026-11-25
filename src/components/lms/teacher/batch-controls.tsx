@@ -107,6 +107,7 @@ export interface BatchFormValues {
   name: string;
   courseId: string;
   teacherId: string;
+  teacherName: string;
   schedule: string;
   /** Structured days/times; null for an older batch with only a text schedule (set them when editing). */
   weekly: WeeklySchedule | null;
@@ -193,8 +194,16 @@ export function BatchFormDialog({
               </NativeSelect>
             </Field>
           )}
-          <Field id="batch-teacher" label="Teacher" error={e.teacherId}>
+          <Field
+            id="batch-teacher"
+            label="Teacher"
+            error={e.teacherId}
+            hint={existing && !teachers.some((t) => t.uid === existing.teacherId) ? "This account is no longer a valid teacher — choose another to save changes." : undefined}
+          >
             <NativeSelect id="batch-teacher" name="teacherId" defaultValue={existing?.teacherId ?? teachers[0]?.uid ?? ""} required>
+              {existing && !teachers.some((t) => t.uid === existing.teacherId) && (
+                <option value={existing.teacherId}>{existing.teacherName} (invalid)</option>
+              )}
               {teachers.map((t) => (
                 <option key={t.uid} value={t.uid}>
                   {t.label}

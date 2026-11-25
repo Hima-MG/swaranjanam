@@ -22,7 +22,7 @@ Object.assign(process.env, {
 
 const { getAdminDb, getAdminAuth } = await import("@/lib/firebase/admin");
 const { SESSION_COOKIE_NAME } = await import("@/lib/auth/constants");
-const { addMemberTx, createBatchRecord, mapBatch, listBatches, getBatchDetail } = await import("@/lib/lms/server/batches");
+const { addMemberTx, createBatchRecord, mapBatch, listBatches, listTeachers, getBatchDetail } = await import("@/lib/lms/server/batches");
 const batchActions = await import("@/app/(account)/teacher/batch-actions");
 const { FieldValue } = await import("firebase-admin/firestore");
 
@@ -166,5 +166,47 @@ describe("batches have no maximum size", () => {
       active: true,
     });
     assert.equal((await db.collection("batches").doc(batchId).get()).get("capacity"), undefined);
+  });
+});
+
+// Reproduces "the teacher dropdown shows a name, but submitting rejects it with
+// 'Choose a teacher.'": listTeachers() (the dropdown) and teacherFor() (the
+// Server Action's validation) must always agree on who counts as a teacher.
+describe("teacher assignment: dropdown and validation agree on who is a valid teacher", () => {
+  test("a teacher promoted by writing the Firestore profile role directly (no custom claim) is listed and assignable", async () => {
+    const user = await auth.createUser({ email: `profile-only-${run}@example.test`, displayName: "Profile Only Teacher" });
+    await db.collection("users").doc(user.uid).set({ email: user.email, displayName: "Profile Only Teacher", role: "teacher" });
+    const teachers = await listTeachers(teacher);
+    assert.ok(teachers.some((t) => t.uid === user.uid), "listed as a selectable teacher");
+    actAs(teacher);
+    const { batchId } = ok(
+      await batchActions.createBatch({ name: "Profile-only teacher's batch", courseId: course, teacherId: user.uid, days: ["sun"], startTime: "09:00", endTime: "10:00", meetUrl: null, status: "active" }),
+    );
+    assert.equal((await db.collection("batches").doc(batchId).get()).get("teacherId"), user.uid);
+  });
+
+  test("an account whose Auth custom claim disagrees with its Firestore profile ('student' claim, 'teacher' profile) is not listed, and is rejected if assigned anyway", async () => {
+    const user = await auth.createUser({ email: `claim-conflict-${run}@example.test`, displayName: "Swaraanjanam Music academy" });
+    // Signed up as a student first (claim set), then promoted by editing the Firestore
+    // profile directly instead of running `npm run set-role` (which would also update the claim).
+    await auth.setCustomUserClaims(user.uid, { role: "student" });
+    await db.collection("users").doc(user.uid).set({ email: user.email, displayName: "Swaraanjanam Music academy", role: "teacher" });
+    const teachers = await listTeachers(teacher);
+    assert.ok(!teachers.some((t) => t.uid === user.uid), "not offered as a selectable teacher while the claim disagrees");
+    actAs(teacher);
+    const result = await batchActions.createBatch({ name: "Should not be created", courseId: course, teacherId: user.uid, days: ["sun"], startTime: "09:00", endTime: "10:00", meetUrl: null, status: "active" });
+    assert.equal(result.ok, false);
+    assert.equal(result.fieldErrors?.teacherId, "Choose a teacher.");
+  });
+
+  test("a Firestore profile with role 'teacher' but no matching Firebase Auth account is not listed, and is rejected if assigned anyway", async () => {
+    const orphanId = id("orphan-teacher-doc");
+    await db.collection("users").doc(orphanId).set({ displayName: "Swaraanjanam Music academy", role: "teacher" });
+    const teachers = await listTeachers(teacher);
+    assert.ok(!teachers.some((t) => t.uid === orphanId), "not offered: no real account backs this profile");
+    actAs(teacher);
+    const result = await batchActions.createBatch({ name: "Should not be created", courseId: course, teacherId: orphanId, days: ["sun"], startTime: "09:00", endTime: "10:00", meetUrl: null, status: "active" });
+    assert.equal(result.ok, false);
+    assert.equal(result.fieldErrors?.teacherId, "Choose a teacher.");
   });
 });
