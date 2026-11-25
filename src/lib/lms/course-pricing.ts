@@ -19,9 +19,9 @@ import { isPeriod } from "@/lib/lms/class-billing";
 import { isTime, minutesOf, SHARED_RATES, WEEKDAYS, type TimeRange, type Weekday } from "@/lib/lms/registration";
 
 export const MAX_COURSE_PRICE_RUPEES = 100_000;
-/** Batches are small groups: the academy's limit is 5 students. */
-export const DEFAULT_BATCH_CAPACITY = 5;
-export const MAX_BATCH_CAPACITY_SETTING = 5;
+/** The teacher picks each course's batch capacity, from 1 up to this academy-wide ceiling. */
+export const DEFAULT_BATCH_CAPACITY = 10;
+export const MAX_BATCH_CAPACITY_SETTING = 100;
 
 export interface CoursePricing {
   batchEnabled: boolean;
@@ -119,7 +119,7 @@ export function parseCoursePricing(input: Record<string, unknown>): { value: Cou
   if (sharedBatch === undefined) errors.sharedBatchPrice = "Enter a valid amount, or leave it empty for the academy rate.";
   if (sharedIndividual === undefined) errors.sharedIndividualPrice = "Enter a valid amount, or leave it empty for the academy rate.";
   const capText = typeof input.batchCapacity === "number" ? String(input.batchCapacity) : typeof input.batchCapacity === "string" ? input.batchCapacity.trim() : "";
-  const cap = capText === "" ? DEFAULT_BATCH_CAPACITY : /^\d{1,2}$/.test(capText) ? Number(capText) : NaN;
+  const cap = capText === "" ? DEFAULT_BATCH_CAPACITY : /^\d{1,3}$/.test(capText) ? Number(capText) : NaN;
 
   if (!batchEnabled && !individualEnabled) errors.classTypes = "Offer at least one class type (batch or individual).";
   if (batchEnabled) {
