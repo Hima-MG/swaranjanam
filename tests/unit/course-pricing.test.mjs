@@ -11,6 +11,7 @@ import {
   existingRateChangeError,
   hasEnrollableClassType,
   mapAgreedRates,
+  MAX_BATCH_CAPACITY_SETTING,
   parseCoursePricing,
   parseScheduleInfo,
   rateFor,
@@ -37,8 +38,19 @@ describe("course-specific pricing", () => {
     assert.ok(parseCoursePricing({}).errors.classTypes);
     assert.ok(parseCoursePricing({ batchEnabled: "on", batchPrice: "" }).errors.batchPrice);
     assert.deepEqual(parseCoursePricing({ individualEnabled: "on", individualPrice: "750.50" }).value.individualMinor, 75_050);
-    assert.ok(parseCoursePricing({ batchEnabled: "on", batchPrice: "400", batchCapacity: "9" }).errors.batchCapacity);
     assert.equal(parseCoursePricing({ batchEnabled: "on", batchPrice: "400" }).value.batchCapacity, DEFAULT_BATCH_CAPACITY);
+  });
+
+  test("batch capacity: 1 to 100 accepted, 0 and 101 rejected, empty falls back to the default", () => {
+    const capacityOf = (batchCapacity) => parseCoursePricing({ batchEnabled: "on", batchPrice: "400", batchCapacity }).value?.batchCapacity;
+    for (const good of ["1", "5", "6", "10", "99", "100"]) {
+      assert.equal(capacityOf(good), Number(good), `capacity ${good} should be accepted`);
+    }
+    for (const bad of ["0", "101", "-1", "abc"]) {
+      assert.ok(parseCoursePricing({ batchEnabled: "on", batchPrice: "400", batchCapacity: bad }).errors.batchCapacity, `capacity ${bad} should be rejected`);
+    }
+    assert.equal(capacityOf(""), DEFAULT_BATCH_CAPACITY, "empty capacity falls back to the default");
+    assert.equal(MAX_BATCH_CAPACITY_SETTING, 100);
   });
 
   test("courses saved before course pricing use the confirmed ₹400/₹750 with both types offered", () => {

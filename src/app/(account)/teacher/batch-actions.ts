@@ -3,7 +3,7 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { refresh } from "next/cache";
 
-import { TEACHER_CLAIMS } from "@/lib/auth/constants";
+import { resolveRole } from "@/lib/auth/constants";
 import { getAdminAuth } from "@/lib/firebase/admin";
 import { ACADEMY_TIME_ZONE, formatClassTime, normalizeMeetUrl, parseClassTimes } from "@/lib/lms/classes";
 import { writeAudit } from "@/lib/lms/server/audit";
@@ -38,12 +38,18 @@ export interface BatchInput {
 async function teacherFor(teacherId: unknown): Promise<{ uid: string; name: string }> {
   const invalid = new AccessError("Please fix the highlighted fields.", { teacherId: "Choose a teacher." });
   if (!isValidId(teacherId)) throw invalid;
-  const account = await getAdminAuth()
-    .getUser(teacherId)
-    .catch(() => null);
-  const claim = account?.customClaims?.role;
-  if (!account || account.disabled || typeof claim !== "string" || !TEACHER_CLAIMS.includes(claim)) throw invalid;
-  const profile = await col("users").doc(teacherId).get();
+  const [account, profile] = await Promise.all([
+    getAdminAuth()
+      .getUser(teacherId)
+      .catch(() => null),
+    col("users").doc(teacherId).get(),
+  ]);
+  // Same rule as a signed-in account's own role (resolveRole): the custom
+  // claim wins, else the users/{uid}.role profile field decides. Checking
+  // only the claim here rejected teachers promoted by writing the profile
+  // field directly, even though listTeachers() (Firestore-based) already
+  // listed them as selectable.
+  if (!account || account.disabled || resolveRole(account.customClaims?.role, profile.get("role")) !== "teacher") throw invalid;
   return { uid: teacherId, name: (profile.get("displayName") as string | undefined) || account.displayName || account.email || "Teacher" };
 }
 
